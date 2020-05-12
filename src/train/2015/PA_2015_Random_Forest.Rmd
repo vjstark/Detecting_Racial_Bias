@@ -1,0 +1,116 @@
+---
+title: "PA_2015_Random_Forest"
+author: "Virat Joshi"
+date: "4/24/2020"
+output: html_document
+---
+
+
+# Set the working and data directories
+```{r}
+working_dir = "/Users/vjstark/Downloads/CSP-571/Project"
+setwd(working_dir)
+
+data_dir <- "./Data"
+```
+
+```{r}
+# The models are saved in this directory.
+model_path <- paste(dirname(rstudioapi::getActiveDocumentContext()$path), "models", sep = "/")
+print(model_path)
+
+# The train and test data are saved in this directory
+model_data_path <- paste(dirname(rstudioapi::getActiveDocumentContext()$path), "data", sep = "/")
+print(model_data_path)
+
+```
+
+# Load Essential Libraries
+```{r}
+library(corrplot)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(dplyr)
+library(data.table)
+library(mice)
+library(rstudioapi)    
+library(naniar)
+library(caret)
+library(pROC)
+library(ROCR)
+library(precrec)
+
+utils_path = './utils/utils.r'
+model_utils_path = './utils/model_utils.r'
+source(paste(utils_path))
+source(paste(model_utils_path))
+```
+
+
+# Load the imputed hmda csv file.
+```{r}
+hmda_data_df_ <- fread(paste(data_dir, "/hmda_2015_pa_imputed.csv", sep=""))
+hmda_data_df <- as.data.frame(hmda_data_df_)
+```
+
+# Explore the dataframe obtained above.
+```{r}
+head(hmda_data_df, 20)
+colnames(hmda_data_df)
+```
+
+
+
+# Create dataframe based on selected column list from the source dataframe.
+```{r}
+hmda_data_df_for_model <- hmda_data_frame_for_model(hmda_data_df)
+hmda_data_df_for_model <- process_model_df_columns(hmda_data_df_for_model)
+
+```
+
+
+# Explore the dataframe with selected columns obtained above.
+```{r}
+head(hmda_data_df_for_model, 20)
+
+nrow(hmda_data_df_for_model)
+
+```
+
+# Train/test split.
+```{r}
+set.seed(400)
+
+split_dfs <- train_test_split(hmda_data_df_for_model$loan_granted, hmda_data_df_for_model)
+
+train <- split_dfs[[1]]
+test <- split_dfs[[2]]
+```
+
+From the selected columns in EDA for feature importances, we select top features and build a model using those predictors.
+```{r}
+library("randomForest")
+set.seed(1234)
+
+rf_formula = loan_granted~applicant_race_and_ethnicity + applicant_income_000s + loan_amount_000s + preapproval + co_applicant_present + minority_population + loan_purpose + tract_to_msamd_income + applicant_sex + property_type + owner_occupancy + agency_code + rate_spread + respondent_id
+
+rf_model <- randomForest(rf_formula,data=train,ntree=128)
+```
+
+```{r}
+pred = predict(rf_model, newdata=test)
+#table(pred, test$loan_granted)
+confusionMatrix(pred,test$loan_granted, positive = "yes")
+precision_recall(confusionMatrix(pred,test$loan_granted, positive = "yes")$table)
+```
+
+# A plot of error vs the number of tree.
+```{r}
+plot(rf_model)
+```
+
+# Importance of each parameter in terms of their Gini values
+```{r}
+importance(rf_model)
+```

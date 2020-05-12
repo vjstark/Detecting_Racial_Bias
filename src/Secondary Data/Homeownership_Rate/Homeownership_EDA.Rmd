@@ -1,0 +1,119 @@
+---
+title: "Homeownership Rate in USA"
+output: html_notebook
+author: "Omkar Pawar"
+
+---
+
+## Import Data from Census Homeownership Rate according to race.
+
+```{r}
+library("readxl")
+library(ggplot2)
+df <- read_excel("HomeOwnershipByRace.xlsx")
+df
+
+df<-na.omit(df)
+
+new_df <- as.matrix(df[-1])
+row.names(new_df)<-df$...1
+new_df <- as.data.frame(new_df)
+
+new_df
+```
+Now we have data loaded. From the column names we can see that the first column has the race and remaining columns are per year home ownership rates.
+```{r}
+df1<-as.data.frame(t(new_df))
+```
+
+```{r}
+df1 <- cbind(Year = rownames(df1), df1)
+rownames(df1) <- 1:nrow(df1)
+names(df1)<-make.names(names(df1),unique = TRUE)
+df1
+colnames(df1)<-c("Year","Overall_US", "All_Whites","Non_Hispanic_Whites","African_American","Minorities",
+  "American.Indian.or.Alaskan.Native.alone","Asian.or.Native.Hawaiian.Pacific.Islander.alone","Hispanic.or.Latino","Non.Hispanic")
+```
+## US Homeownership Rate and Minorities Homeownership Rate
+```{r}
+ggplot(data = df1 , aes(x = Year , group = 1) ) + 
+  geom_line(aes(y = Overall_US , colour = "Overall_US"),linetype = "dashed") + 
+  geom_line(aes(y = Minorities , colour = "Minorities"),size = 1)+
+  geom_rect(data=rect, aes(xmin=xmin, xmax=xmax,ymin = ymin,ymax = ymax),
+              fill="grey10",
+              alpha=0.25,
+              inherit.aes = FALSE)+
+  scale_colour_manual("", 
+                      breaks = c("Overall_US","Minorities"),
+                      values = c("tomato2", "#009E73"))+
+  scale_y_continuous("HomeOwnership Rate", limits = c(50,70))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  labs(title = "Homeownership Rate Comparision between Overall Population and Minorities")
+ggsave("/Users/omkarpawar/Desktop/HomeOwnership_Minorirtes.png",width = 14.5,height = 7)
+```
+
+## Homeownership Rate Comparision between Whites and Black population
+```{r}
+
+rect <- data.frame(xmin=as.factor(2006), xmax=as.factor(2008),ymin = 50,ymax = 70)
+
+ggplot(data = df1 , aes(x = Year , group = 1) ) + 
+  geom_line(aes(y = Overall_US , colour = "Overall US"),linetype = "dashed") + 
+  geom_line(aes(y = African_American , colour = "African American"),size = 1)+
+  geom_line(aes(y = Non_Hispanic_Whites , colour = "Whites"),size = 1)+
+  geom_rect(data=rect, aes(xmin=xmin, xmax=xmax,ymin = ymin,ymax = ymax),
+              fill="grey10",
+              alpha=0.25,
+              inherit.aes = FALSE)+
+  scale_colour_manual("", 
+                      breaks = c("Overall US",  "African American","Whites"),
+                      values = c("tomato2", "#009E73","slateblue"))+
+  scale_y_continuous( limits = c(40,85))+ 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  labs(title = "Homeownership Rate Comparision between Whites and African Americans",y = "Home-ownership Rate(%)",x = "Timeline",fill = "Race and Ethnicity")+theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ggsave("/Users/omkarpawar/Desktop/HomeOwnership.png",width = 14.5,height = 7)
+```
+
+
+```{r}
+ggplot(data = df1 , aes(x = Year , group = 1) ) + 
+  geom_line(aes(y = Overall_US , colour = "Overall_US")) + 
+  
+  geom_line(aes(y = Non_Hispanic_Whites , colour = "Non_Hispanic_Whites"))+
+  geom_line(aes(y = African_American , colour = "African_American"))+
+  
+  geom_line(aes(y = American.Indian.or.Alaskan.Native.alone , colour = "American.Indian.or.Alaskan.Native.alone"))+
+  geom_line(aes(y = Asian.or.Native.Hawaiian.Pacific.Islander.alone , colour = "Asian.or.Native.Hawaiian.Pacific.Islander.alone"))+
+  geom_line(aes(y = Hispanic.or.Latino , colour = "Hispanic.or.Latino"))+
+  
+  scale_colour_manual("", 
+                      breaks = c("Overall_US", "Non_Hispanic_Whites" , "African_American","American.Indian.or.Alaskan.Native.alone","Asian.or.Native.Hawaiian.Pacific.Islander.alone","Hispanic.or.Latino"),
+                      values = c("#999999",  "#56B4E9",  "purple", "#0072B2", "#D55E00", "#CC79A7"))+
+  scale_y_continuous("HomeOwnership Rate", limits = c(40,80))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+ 
+```
+
+## All Possible Race and Ethnicity Values
+```{r}
+ggplot(data = df1 , aes(x = Year , group = 1) ) + 
+  geom_line(aes(y = Overall_US , colour = "Overall_US")) + 
+  geom_line(aes(y = All_Whites , colour = "All_Whites"))+
+  geom_line(aes(y = Non_Hispanic_Whites , colour = "Non_Hispanic_Whites"))+
+  geom_line(aes(y = African_American , colour = "African_American"))+
+  geom_line(aes(y = Minorities , colour = "Minorities"))+
+  geom_line(aes(y = American.Indian.or.Alaskan.Native.alone , colour = "American.Indian.or.Alaskan.Native.alone"))+
+  geom_line(aes(y = Asian.or.Native.Hawaiian.Pacific.Islander.alone , colour = "Asian.or.Native.Hawaiian.Pacific.Islander.alone"))+
+  geom_line(aes(y = Hispanic.or.Latino , colour = "Hispanic.or.Latino"))+
+  geom_line(aes(y = Non.Hispanic , colour = "Non.Hispanic"))+
+  scale_colour_manual("", 
+                      breaks = c("Overall_US", "All_Whites","Non_Hispanic_Whites" , "African_American","Minorities","American.Indian.or.Alaskan.Native.alone","Asian.or.Native.Hawaiian.Pacific.Islander.alone","Hispanic.or.Latino","Non.Hispanic"),
+                      values = c("#999999", "#E69F00", "#56B4E9", "#009E73", "purple", "#0072B2", "#D55E00", "#CC79A7","#293352"))+
+  scale_y_continuous("HomeOwnership Rate", limits = c(40,80)) +
+theme(axis.text.x = element_text(angle = 45, hjust = 1))+
+  labs(title = "All Possible Race and Ethnicity Values")
+
+```
+
+
+

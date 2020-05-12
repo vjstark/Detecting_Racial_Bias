@@ -1,0 +1,217 @@
+---
+title: "Logistic Regression for Loansharks (2014 IL)"
+author: "Anantanarayanan G Iyengar"
+date: "4/27/2020"
+output: html_notebook
+---
+
+## We only tried one glm model here. This was based on the work done
+## for the models for Pennsylvania. 
+# Model 1. Log of loan amount and loan to income ratio.
+
+## Results.
+# Performance was similar to the models for PA. The criterion was AUC 
+# curve, Mcfadden R square value and confusion matrix results on test data.
+
+## Key observation
+# The AUC curve for our model is around 74.5. The AUC curve can
+# be thought of as a classification-threshold-invariant. It measures the #
+# quality of the model's predictions irrespective of the threshold value
+# https://developers.google.com/machine-learning/crash-course/classification/roc-and-auc.
+# We feel that this is because our models miss crucial data like debt to income
+# ratio, credit scores, etc which banks use as additional predictors.
+
+## Global setup like working directory, data directory etc should happen here.
+
+```{r}
+library(sys)
+
+working_directory <- getwd()
+
+setwd(dirname(dirname(working_directory)))
+
+writeLines("")
+getwd()
+# The HMDA dataset is loaded from here.
+data_dir <- "D:/data"
+census_data_dir = "d:/data/census"
+
+# The models are saved in this directory.
+model_path <- paste(dirname(rstudioapi::getActiveDocumentContext()$path), "models", sep = "/")
+print(model_path)
+
+# The train and test data are saved in this directory
+model_data_path <- paste(dirname(rstudioapi::getActiveDocumentContext()$path), "data", sep = "/")
+print(model_data_path)
+
+options(scipen = 999)
+
+```
+
+## Install required packages.
+```{r}
+# https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
+list_of_packages <- c("mlbench", "corrplot", "rvest", "tidyr", "stringr", "dplyr", "lubridate", "data.table", "mice", "scales", "naniar", "rpart", "rpart.plot", "caret", "pROC", "ROCR")
+new.packages <- list_of_packages[!(list_of_packages %in% installed.packages()[,"Package"])]
+
+if (length(new.packages)) {
+  print("Installing packages\n")
+  install.packages(new.packages())
+}
+
+library(corrplot)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(dplyr)
+library(data.table)
+library(mice)
+library(rstudioapi)    
+library(naniar)
+library(caret)
+library(pROC)
+library(ROCR)
+
+source(paste(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))), "utils/utils.r", sep="/"))
+
+source(paste(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))), "utils/model_utils.r", sep="/"))
+
+```
+
+## Load data file
+```{r}
+#hmda_data_pa <- fread(paste(data_dir, "/hmda_2007_pa_all-records_labels.csv", sep = ""))
+
+hmda_data_il <- fread(paste(data_dir, "/HMDA/2014/hmda_2014_il_all-records_labels.csv", sep = ""))
+```
+
+## Convert to dataframe
+```{r}
+hmda_il_df <- as.data.frame(hmda_data_il)
+head(hmda_il_df)
+```
+
+
+# Impute as needed.
+```{r}
+
+# https://www.rdocumentation.org/packages/mice/versions/3.8.0/topics/mice.impute.cart
+hmda_il_df_imputed <- mice(hmda_il_df, m=1, maxit=2, meth='cart',seed=500)
+
+hmda_data_il_df_imputed <- mice::complete(hmda_il_df_imputed)
+
+```
+
+```{r}
+## Add a new column applicant_race_and_ethnicity and group all applicants
+## with ethnicity as Hispanic or Latino as Hispanic or Latino in this column.
+## For everyone else, this column gets values from the applicant_race_name_1 
+## column
+
+hmda_data_il_df_imputed <- add_applicant_race_and_ethicity_to_hmda(hmda_data_il_df_imputed)
+```
+
+
+# Save the imputed dataframe to file.
+```{r}
+
+write.csv(hmda_data_il_df_imputed, paste(data_dir, "/HMDA/2014/hmda_2014_il_imputed.csv", sep = ""), row.names = FALSE)
+```
+
+# Explore the dataframe obtained above.
+```{r}
+hmda_data_df <- hmda_data_il_df_imputed
+head(hmda_data_df, 20)
+# Ignore action values of 4 : Application withdrawn by applicant
+# 6: Loan purchased by the institution and 2: Application approved but
+# not accepted. 
+# The remaining action types are 1: Loan originated, 3. Application denied
+# by financial institution, 5. File closed for incompleteness and 7. Preapproval
+# request denied by financial institution.
+hmda_data_df <- hmda_data_df[hmda_data_df$action_taken != 2 & hmda_data_df$action_taken != 4 & hmda_data_df$action_taken != 6, ]
+
+```
+
+# Count how many unique county codes and respondent ids there are
+```{r}
+
+length(unique(hmda_data_df$county_code))
+length(unique(hmda_data_df$respondent_id))
+```
+
+# Create dataframe based on selected column list from the source dataframe.
+```{r}
+hmda_data_df_for_model <- hmda_data_frame_for_model(hmda_data_df)
+hmda_data_df_for_model <- process_model_df_columns(hmda_data_df_for_model)
+
+```
+
+# Explore the dataframe with selected columns obtained above.
+
+```{r}
+head(hmda_data_df_for_model, 20)
+
+nrow(hmda_data_df_for_model)
+
+length(levels(hmda_data_df_for_model$respondent_id))
+length(levels(hmda_data_df_for_model$county_code))
+
+
+```
+
+# Train/test split.
+```{r}
+set.seed(400)
+
+split_dfs <- train_test_split(hmda_data_df_for_model$loan_granted, hmda_data_df_for_model)
+
+train <- split_dfs[[1]]
+test <- split_dfs[[2]]
+
+```
+
+
+# Null model
+```{r}
+null_model <- build_and_evaluate_hmda_null_model("loan_granted~1", train, test)
+```
+
+
+# Model with logs of applicant income and loan to income ratio
+
+```{r}
+model_2014_il_ratio_of_loan_to_income_with_log_of_income_and_amount <- build_glm_model("loan_granted~applicant_race_and_ethnicity+owner_occupancy+preapproval+log_loan_amount_000s+applicant_sex+county_code+tract_to_msamd_income+co_applicant_present+agency_code+minority_population+loan_purpose+rate_spread+property_type++loan_to_income_ratio+respondent_id", train)
+
+model_summary_and_plot(model_2014_il_ratio_of_loan_to_income_with_log_of_income_and_amount, train)
+
+mcfadden_r_square(model_2014_il_ratio_of_loan_to_income_with_log_of_income_and_amount, null_model)
+
+```
+
+# Model performance.
+
+```{r}
+library(ROCR)
+library(pROC)
+model1_fitted.probs <- predict(model_2014_il_ratio_of_loan_to_income_with_log_of_income_and_amount, test, type = "response")
+
+writeLines("")
+writeLines("Model 1 performance")
+print_model_performance(model1_fitted.probs, test, positive = "yes", negative = "no", threshold = 0.6)
+
+```
+
+# Save the models
+```{r}
+dir.create(model_path, showWarnings = FALSE)
+save(model_2014_il_ratio_of_loan_to_income_with_log_of_income_and_amount, file = paste(model_path, "/model_il_loan_income_ratio_with_log_of_income_and_amount.rdata", sep=""))
+```
+
+# Save the train and test data for future reference.
+```{r}
+
+dir.create(model_data_path, showWarnings = FALSE)
+save(train, file = paste(model_data_path, "/train_il.rdata", sep = ""))
+save(test, file = paste(model_data_path, "/test_il.rdata", sep = ""))
+
+```

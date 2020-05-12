@@ -1,0 +1,202 @@
+---
+title: "Project Experiment for Illinois Home Loans for 2017"
+output: html_notebook
+---
+
+## Global setup like working directory, data directory etc should happen here.
+```{r}
+# Please change the working directory as needed.
+working_dir <- "/Users/omkarpawar/Downloads"
+setwd(working_dir)
+
+data_dir <- "D:/data/HMDA"
+```
+
+## Load essential Libraries
+```{r}
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(dplyr)
+library(corrplot)
+library(data.table)
+library(mice)
+library(rstudioapi)    
+#library(naniar)
+
+```
+
+## Load Data
+```{r}
+hmda_data_il <- fread(paste(working_dir, "/hmda_2017_il_all-records_labels.csv", sep = ""))
+```
+## Data Exploration
+
+Print head rows of the dataframe and the column names
+```{r}
+hmda_il_df <- as.data.frame(hmda_data_il)
+head(hmda_il_df)
+```
+
+
+```{r}
+colnames(hmda_il_df)
+```
+
+
+```{r}
+summary(hmda_il_df)
+df_copy<-hmda_il_df
+```
+
+
+```{r}
+dim(hmda_il_df)
+```
+
+
+```{r}
+glimpse(hmda_il_df)
+```
+
+## Find and Handle missing values
+Look for NA
+```{r}
+sapply(hmda_il_df, function(x) sum(is.na(x)))
+```
+Check for any empty strings
+
+```{r}
+sapply(hmda_il_df, function(x) sum(x == ""))
+```
+
+
+```{r}
+sapply(hmda_il_df, function(x) sum(x == NULL))
+```
+
+## Race and Ethnicity columns and insights
+Race
+```{r}
+unique(hmda_il_df$applicant_race_name_1)
+```
+```{r}
+unique(hmda_il_df$applicant_ethnicity_name)
+```
+
+
+```{r}
+table(hmda_il_df$applicant_race_name_1)
+```
+
+```{r}
+hmda_il_df$applicant_race_and_ethnicity <- NA
+hmda_il_df$co_applicant_race_and_ethnicity <- NA
+
+hmda_il_df$applicant_race_and_ethnicity <- ifelse(hmda_il_df$applicant_ethnicity_name == "Hispanic or Latino",
+       "Hispanic or Latino", hmda_il_df$applicant_race_name_1)
+
+hmda_il_df$co_applicant_race_and_ethnicity <- ifelse(hmda_il_df$co_applicant_ethnicity_name == "Hispanic or Latino",
+       "Hispanic or Latino", hmda_il_df$co_applicant_race_name_1)
+
+
+head(hmda_il_df)
+```
+
+
+```{r}
+count_racename <- as.data.frame(table(hmda_il_df$applicant_race_and_ethnicity))
+colnames(count_racename)<-c("Race_and_Ethnicity","Count")
+
+p<-ggplot(data=count_racename, aes(x=reorder(Race_and_Ethnicity,-Count), y=Count)) + geom_bar(stat="identity",fill="steelblue")+geom_text(aes(label=Count), size=2.5)
+p + coord_flip() +labs(title = "Distribution of applicants by Race and Ethnicity", y="Number of Applicants",x="Race and Ethnicity")
+
+#text(x = p, y = count_racename$Count, label = count_racename$Count, pos = 3, cex = 0.8, col = "red")
+```
+
+
+```{r}
+count_racename[order(count_racename$Count),]
+```
+
+
+```{r}
+library(plotrix)
+#pie3D(count_racename$Count,labels = count_racename$Race_and_Ethnicity,explode=0.1)
+```
+
+
+```{r}
+hmda_origination_status_df <- hmda_il_df[hmda_il_df$action_taken == "1", ]
+
+head(hmda_origination_status_df)
+
+ggplot(hmda_origination_status_df, aes(x=applicant_income_000s)) + geom_histogram(binwidth = 10)
+
+max(hmda_origination_status_df$applicant_income_000s)-min(hmda_origination_status_df$applicant_income_000s)
+
+hist(hmda_origination_status_df$applicant_income_000s,xlim = c(0,100))
+
+class(hmda_origination_status_df)
+
+sum(is.na(hmda_origination_status_df$applicant_income_000s))/length(hmda_origination_status_df$applicant_income_000s)*100
+
+hmda_origination_status_df$applicant_income_000s[is.na(hmda_origination_status_df$applicant_income_000s)]<-median(hmda_origination_status_df$applicant_income_000s,na.rm = TRUE)
+
+length(hmda_origination_status_df$applicant_income_000s[hmda_origination_status_df$applicant_income_000s>1000])
+```
+## Income of applicants
+```{r}
+summary(hmda_il_df$applicant_income_000s)
+
+```
+Here it can be observed that the income of applicants is spreadout a lot. We have applicants with income ranging from 1 to 147759 in thousands. Also, missing values sum upto 65583.
+
+Replace missing values in applicants income with median.
+```{r}
+hmda_il_df$applicant_income_000s[is.na(hmda_il_df$applicant_income_000s)]<-median(hmda_il_df$applicant_income_000s,na.rm = TRUE)
+```
+Find the income distribution based on race and ethnicity
+```{r}
+p <- ggplot(group_by(hmda_il_df,applicant_race_and_ethnicity), aes(x=applicant_race_and_ethnicity, y=applicant_income_000s)) + 
+  geom_boxplot()
+p +coord_flip()
+```
+In the boxplot, the category where people didn't provide the race and ethnicity data has most extreme values. 
+
+### These are probably outliers and we need to deal with them
+```{r}
+p <- ggplot(group_by(hmda_origination_status_df,applicant_race_and_ethnicity), aes(x=applicant_race_and_ethnicity, y=applicant_income_000s)) + 
+  geom_boxplot()
+p +coord_flip()
+```
+
+```{r}
+unique(hmda_il_df$action_taken_name)
+```
+Here we are trying to find the distribution of loans that are denied over race and ethnicity.
+## Create a new column where we classify the action taken as loan is denied or not.
+```{r}
+hmda_il_df$denied
+hmda_il_df$denied<-NA
+
+hmda_il_df$denied[hmda_il_df$action_taken_name == "Application denied by financial institution" | hmda_il_df$action_taken_name == "Preapproval request denied by financial institution"]<- "Denied"
+
+hmda_il_df$denied[is.na(hmda_il_df$denied)]<-"Approved"
+unique(hmda_il_df$denied)
+
+application_denied<-sum(hmda_il_df$denied == "Denied")
+application_originated<-sum(hmda_il_df$denied == "Approved")
+application_denied/length(hmda_il_df$action_taken)
+group_by(hmda_il_df$action_taken)
+
+ggplot(hmda_il_df,aes(hmda_il_df$applicant_race_and_ethnicity, ..count..)) +geom_bar(aes(fill= hmda_il_df$denied))
+library(ggplot2)
+class(hmda_il_df$denied)
+hmda_il_df$denied - as.character(hmda_il_df$denied)
+p<-ggplot(hmda_il_df , aes (x = applicant_race_name_1 , fill = denied,)) + geom_bar(position = "dodge")
+p + coord_flip()
+hmda_il_df$denied
+
+?summarise_at(group_by(hmda_il_df,applicant_race_name_1),vars(denied),func())
+```

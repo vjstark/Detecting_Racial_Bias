@@ -1,0 +1,90 @@
+---
+title: "Imputations"
+output: html_notebook
+---
+
+# Load Libraries
+
+```{r}
+library(summarytools)
+library(tidyverse)
+library(plyr)
+library(rpart)
+library(rpart.plot)
+library(caTools)
+library(caret)
+library(DT)
+library(dplyr)
+library(caroline)
+library(Hmisc)
+rm(list=ls())
+
+source(paste(dirname(dirname(rstudioapi::getActiveDocumentContext()$path)), "utils/utils.r", sep="/"))
+
+#source("/Users/omkarpawar/Desktop/csp-571-02-final-project/src/utils/utils.r")
+#source("/Users/omkarpawar/Desktop/csp-571-02-final-project/src/utils/model_utils.r")
+
+```
+
+# Load Data
+```{r}
+df_2007 <- data.frame(fread("/Users/omkarpawar/Desktop/Data/hmda_2007_pa_all-records_labels.csv"))
+```
+# Drop columns that are not needed 
+```{r}
+drops <- c("applicant_race_name_2","applicant_race_name_4","applicant_race_name_5","applicant_race_5",
+           "co_applicant_race_name_2","co_applicant_race_name_3","co_applicant_race_name_4","co_applicant_race_4",
+           "co_applicant_race_name_5","co_applicant_race_5","co_applicant_race_2","co_applicant_race_name_2","denial_reason_2","denial_reason_3","co_applicant_race_3 "," applicant_race_4 ","co_applicant_race_3 ","applicant_race_3"  ,              "applicant_race_4","applicant_race_2","co_applicant_race_3","denial_reason_1","rate_spread","edit_status")
+df_2007<- df_2007[ , !(names(df_2007) %in% drops)]
+```
+# Added new columns based on actiopn taken
+```{r}
+df_2007$applicant_race_and_ethnicity <- NA
+df_2007$co_applicant_race_and_ethnicity <- NA
+
+df_2007$applicant_race_and_ethnicity <- ifelse(df_2007$applicant_ethnicity_name == "Hispanic or Latino",
+       "Hispanic or Latino", df_2007$applicant_race_name_1)
+
+df_2007$co_applicant_race_and_ethnicity <- ifelse(df_2007$co_applicant_ethnicity_name == "Hispanic or Latino",
+       "Hispanic or Latino", df_2007$co_applicant_race_name_1)
+
+df_2007$applicant_race_and_ethnicity[df_2007$applicant_race_and_ethnicity == "Information not provided by applicant in mail, Internet, or telephone application"] <- "No Information Provided"
+```
+
+Check Null values
+```{r}
+sapply(df_2007,function (x) sum(is.na(x)))
+```
+# Rowwise missing values. Drop rows with missing values more than 9
+```{r}
+df_2007$na_count <- apply(df_2007, 1, function(x) sum(is.na(x)))
+print(count(df_2007, "na_count"))
+
+df_2007<-df_2007[!(df_2007$na_count>=9 ),]
+dim(df_2007)
+```
+# Check rowwise count again
+```{r}
+df_2007$na_count <- apply(df_2007, 1, function(x) sum(is.na(x)))
+print(count(df_2007, "na_count"))
+dim(df_2007)
+```
+Remove rows with applicant income and loan amount as 9999
+```{r}
+df_2007 <- df_2007[!(df_2007$applicant_income_000s>9998),]
+df_2007 <- df_2007[!(df_2007$loan_amount_000s>99998),]
+```
+
+# Impute missing values
+```{r}
+library(mice)
+imputed_2007<-mice(df_2007,m=1,maxit=2,meth="cart",seed=500)
+imputed_2007 <- mice::complete(imputed_2007)
+
+#Loan to income ratio
+imputed_2007$loan_to_income_ratio <- imputed_2007$loan_amount_000s/imputed_2007$applicant_income_000s
+```
+# Save to file 
+```{r}
+write.csv(imputed_2007,"Give path here.")
+```

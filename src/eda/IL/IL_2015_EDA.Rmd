@@ -1,0 +1,415 @@
+---
+title: "Illinois 2015 Exploratory Data Analysis"
+authors: "Omkar Pawar"
+date: "2/16/2020"
+output: html_notebook
+---
+## Setup Directory and Import Libraries.
+Here we import important libraries and set the file path. 
+
+```{r}
+#Change file path here. Data can be downloaded from HMDA website.
+file_path <- "/Users/omkarpawar/Desktop/Data/IL/hmda_2017_il_all-records_labels.csv"
+
+library(corrplot)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(dplyr)
+library(data.table)
+library(mice)
+library(rstudioapi)    
+library(naniar)
+dirname<- getwd()
+```
+### Load util files
+We have written some utility functions which we can use directly in our code.
+```{r}
+source(paste(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))), "utils/utils.r", sep="/"))
+source(paste(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))), "utils/model_utils.r", sep="/"))
+```
+
+## Load data
+Save the data into dataframe
+```{r}
+hmda_il <- fread(file_path)
+hmda_il_df <- as.data.frame(hmda_il)
+```
+
+# Data Analysis Section 1 :Familiarise with data
+### Columns in the dataset
+See what columns are present in this data. Get to know the dimensions and other features of the data.
+```{r}
+colnames(hmda_il_df)
+```
+
+Dimensions of the data
+```{r}
+dim(hmda_il_df)
+```
+
+### First 10 rows from the data
+Look ath the actual data values.
+```{r}
+head(hmda_il_df,10)
+```
+### Print the glimpse of the dataset
+
+```{r}
+glimpse(hmda_il_df)
+```
+# Data Analysis Section 2: Missing Values
+Check for each column.
+
+Missing values can be in different formats. Mostly they are represented by NAs.
+
+```{r}
+sapply(hmda_il_df,function(x) sum(is.na(x)))
+```
+
+Sometimes missing data can also be an empty string. Check for any empty strings
+```{r}
+sapply(hmda_il_df,function(x) sum(x==""))
+```
+
+Any missing values encoded as ?
+```{r}
+sapply(hmda_il_df,function(x) sum(x=="?"))
+```
+
+Any NULL values?
+
+```{r}
+sapply(hmda_il_df,function(x) sum(is.null(x)))
+```
+# Data Analysis Section 3: Analysis on the columns of interest
+### Columns having the information about applicants Race and Ethnicity
+Before we get to know that, lets see what are the different knid of loans applied to.
+### Different Type of Loans
+```{r}
+unique(hmda_il_df$loan_type_name)
+```
+
+Find the number of applicant for each type of loan.
+```{r}
+graph_loan_types(hmda_il_df)
+```
+Looks like there are more applications for conventional loans. 
+### THe focus of this project is concentrated to "Conventinal Loans."
+
+Now lets look at the columns that give applicants Race and Ethnicity.
+### Applicants Ethnicity Values
+
+```{r}
+unique(hmda_il_df$applicant_ethnicity_name)
+```
+Applicant Race Encoded Numbers
+```{r}
+unique(hmda_il_df$applicant_race_1)
+```
+Applicant Race Name
+```{r}
+unique(hmda_il_df$applicant_race_name_1)
+```
+It is convenient to merge the race and ethnicity columns. We do that here. If the ethnicity of applicant is HISPANIC or LATINO, we give the new column the value as HISPANIC or LATINO. Else the column takes the race as its value.
+
+```{r}
+hmda_il_df$applicant_race_and_ethnicity <- NA
+hmda_il_df$co_applicant_race_and_ethnicity <- NA
+
+hmda_il_df$applicant_race_and_ethnicity <- ifelse(hmda_il_df$applicant_ethnicity_name == "Hispanic or Latino",
+       "Hispanic or Latino", hmda_il_df$applicant_race_name_1)
+
+hmda_il_df$co_applicant_race_and_ethnicity <- ifelse(hmda_il_df$co_applicant_ethnicity_name == "Hispanic or Latino",
+       "Hispanic or Latino", hmda_il_df$co_applicant_race_name_1)
+
+hmda_il_df$applicant_race_and_ethnicity[hmda_il_df$applicant_race_and_ethnicity == "Information not provided by applicant in mail, Internet, or telephone application"] <- "No Information Provided"
+
+head(hmda_il_df)
+```
+
+Lets find the distributions of applicants based on their race
+White applicants are way more in number than that of other group of people. It is the obvious thing as minorites have less number of applicants.
+
+One thing to note here is that a lot of applicants don't disclose their race. We see large values for "NOT APPLICABLE" and "NO INFORMATION PROVIDED"
+```{r}
+count_racename <- as.data.frame(table(hmda_il_df$applicant_race_and_ethnicity))
+colnames(count_racename)<-c("Race_and_Ethnicity","Count")
+p<-ggplot(data=count_racename, aes(x=reorder(Race_and_Ethnicity,-Count), y=Count)) + geom_bar(stat="identity",fill="steelblue")+geom_text(aes(label=Count), size=2.5)
+p + coord_flip() +labs(title = "Distribution of applicants by Race and Ethnicity", y="Number of Applicants",x="Race and Ethnicity")
+
+```
+
+### Applicants Income
+
+Lets dive into the applicants income. The distribution can help us understand the spread of data.
+```{r}
+summary(hmda_il_df$applicant_income_000s)
+```
+Here it can be observed that the income of applicants is spreadout a lot. We have applicants with income ranging from 1 to 147759 in thousands. Also, missing values sum upto 65583. About 13% applicants income value is missing.
+
+Also, most of the recorded income lies between 53 to 127 range
+```{r}
+ggplot(data = hmda_il_df,aes(x = applicant_income_000s)) + geom_boxplot()
+```
+We can clearly see there are a lot of outliers. It can also be interpreted from the summary. Lets look for the count.
+
+### Histogram for the people having income less that 500K
+```{r}
+temp<-as.data.frame(hmda_il_df$applicant_income_000s[hmda_il_df$applicant_income_000s<500])
+ggplot(data = temp, aes(x=hmda_il_df$applicant_income_000s[hmda_il_df$applicant_income_000s < 500])) +geom_histogram(fill = "steelblue") + labs(title = "Applicant for income below 500K" , x = "Income in thousands",y="Count")
+```
+
+The distribution is right skewed. It would be better if we use median as the measure of central tendency. Lets see what % of applicants have income below 500 from the entire dataset.
+```{r}
+no_of_NAs <- sum(is.na(temp))
+income_below_500<-length(hmda_il_df$applicant_income_000s[hmda_il_df$applicant_income_000s<500])
+total_applicants<-length(hmda_il_df$applicant_income_000s)
+
+((income_below_500 - no_of_NAs ) / total_applicants ) *100
+```
+Approximately 86% of the total applicants have income below 500K. Among that, 13% of the values are missing.
+```{r}
+writeLines("Percent of missing values")
+sum(is.na(hmda_il_df$applicant_income_000s)) / length(hmda_il_df$applicant_income_000s)
+```
+
+### Applicants according to their race and there median income.
+
+```{r}
+m <- summarise_at(group_by(hmda_il_df,applicant_race_and_ethnicity),vars(applicant_income_000s),funs(mean(.,na.rm=TRUE)))
+ggplot(data = m ,aes (x =  reorder(applicant_race_and_ethnicity,applicant_income_000s),y = applicant_income_000s)) + geom_bar(stat = "identity",fill = "steelblue") +geom_text(aes(label=applicant_income_000s), size=3,nudge_y = 5)+ coord_flip()+labs(title = "Median of applicants income by Race and Ethnicity", y="Median Income",x="Race and Ethnicity")
+```
+The mean income for applicants with no information about race looks high. This maybe due to the following reason.
+```{r}
+p <- ggplot(group_by(hmda_il_df,applicant_race_and_ethnicity), aes(x=applicant_race_and_ethnicity, y=applicant_income_000s)) + 
+  geom_boxplot() + labs(title = "Applicants Income According to Race And Ethnicity" , x = "Applicant Race and Ethnicity" , y = "Income distribution in thousands")
+p +coord_flip()
+```
+In the boxplot, the category where people didn’t provide the race and ethnicity data has most extreme values of income. These are probably outliers. This is why the mean of certain categories shifted to the higher end. Lets look in this data
+
+### Distribution of income for the applicants with originated loans.
+```{r}
+hmda_origination_status_df <- hmda_il_df[hmda_il_df$action_taken == "1", ]
+summary(hmda_origination_status_df$applicant_income_000s)
+
+```
+Lets have a look at the distribution of income for the applicants with loans originated grouped by rac and ethnicity column.
+```{r}
+p <- ggplot(group_by(hmda_origination_status_df,applicant_race_and_ethnicity), aes(x=applicant_race_and_ethnicity, y=applicant_income_000s)) + 
+  geom_boxplot() + labs(title = "Approved Loan Applicant's Income Distribution" , x = "Applicant Race and Ethnicity" , y = "Income distribution in thousands")
+p +coord_flip()
+```
+As mean is a misleading measure of central tendency due to presence of outliers, maybe we can use median to see the income for applicants for loan originated is.
+```{r}
+m <- summarise_at(group_by(hmda_origination_status_df,applicant_race_and_ethnicity),vars(applicant_income_000s),funs(median(.,na.rm=TRUE)))
+ggplot(data = m ,aes (x =  reorder(applicant_race_and_ethnicity,applicant_income_000s),y = applicant_income_000s)) + geom_bar(stat = "identity",fill = "steelblue") +geom_text(aes(label=applicant_income_000s), size=3 , nudge_y = 5)+ coord_flip()+labs(title = "Median of applicants income by Race and Ethnicity", y="Median Income",x="Race and Ethnicity")
+
+```
+This seems understandable and we can analyze it further.
+
+Lets have a look at the distribution of applicant income of originated loans with income less than 500K. We used 500K as our max point because there are many outliers and we would not be able to see where exactly the income is concentrated as outliers are present which we say in the boxplot before.  
+
+```{r}
+temp<-as.data.frame(hmda_origination_status_df$applicant_income_000s[hmda_origination_status_df$applicant_income_000s<500])
+
+ggplot(data = temp, aes(x=hmda_origination_status_df$applicant_income_000s[hmda_origination_status_df$applicant_income_000s < 500])) +geom_histogram(fill = "steelblue") + labs(title = "Applicant with loan approved and income below 500K" , x = "Income in thousands",y="Count")
+```
+
+### Proportion of loans originated 
+What are the set of decisions made for an application?
+```{r}
+unique(hmda_il_df$action_taken_name)
+
+unique(hmda_il_df$action_taken)
+```
+Here, we can say the loan is denied in two ways. 
+1. Application denied by financial institution
+2. Preapproval request denied by financial institution
+
+The loan is approved if 
+1. "Application approved but not accepted"
+2. "Loan originated"
+
+Other than this, we would classify decision as "Technical or paperwork Issues"
+1. "Application withdrawn by applicant"
+2. "Loan purchased by the institution
+3. "File closed for incompleteness"
+4. "Preapproval request approved but not accepted"
+```{r}
+hmda_il_df$Decision <- NA
+
+hmda_il_df$Decision <- ifelse(hmda_il_df$action_taken_name == "Application denied by financial institution" | hmda_il_df$action_taken_name == "Preapproval request denied by financial institution" , "Denied" ,  ifelse(hmda_il_df$action_taken_name == "Loan originated" | hmda_il_df$action_taken_name == "Application approved but not accepted" ,  "Approved" , "Paperwork Issues"))
+      
+tbl <- with(hmda_il_df, table(Decision,applicant_race_and_ethnicity))
+
+ggplot(as.data.frame(tbl), aes(factor(applicant_race_and_ethnicity), Freq, fill = Decision)) +     
+  geom_col(position = 'dodge') + labs(title = "Proportion of loans denied by financial Institutions",x = "Race and Ethnicity" , y = "Number of applicants") + coord_flip()
+```
+We can clearly see that the denial rates for minorites are more than that of White population. It needs to be investigated further.
+
+Lets plot raw action taken as see how they count.
+
+```{r}
+tbl <- with(hmda_il_df, table(action_taken_name,applicant_race_and_ethnicity))
+
+ggplot(as.data.frame(tbl), aes(factor(applicant_race_and_ethnicity), Freq, fill = action_taken_name)) +     
+  geom_col(position = 'dodge') + labs(title = "Proportion of loans denied by financial Institutions",x = "Race and Ethnicity" , y = "Number of applicants")
+```
+It is not clear by looking at this graph. Maybe we can plot the graph for each race and display the percent of loans accepted or denied.
+```{r}
+mortgage_status_by_race_and_ethnicity <- hmda_il_df %>% group_by(action_taken_name, applicant_race_and_ethnicity) %>%
+  summarise(ActionCount = n()) %>%
+  arrange(desc(ActionCount))
+
+mortgage_by_race_and_ethnicity = hmda_il_df %>% group_by(applicant_race_and_ethnicity) %>%
+  summarise(EthnicityCount = n()) %>%
+  arrange(desc(EthnicityCount))
+
+mortgage_status_aggregated_by_race_and_ethnicity  = inner_join(mortgage_status_by_race_and_ethnicity, mortgage_by_race_and_ethnicity) %>% mutate(percentage = (ActionCount / EthnicityCount) * 100)
+
+ggplot(mortgage_status_aggregated_by_race_and_ethnicity, aes(x = reorder(action_taken_name, percentage), 
+                                          y = percentage)) +
+  geom_bar(stat='identity', fill ="#00AFBB") +
+  facet_wrap(~ applicant_race_and_ethnicity) +
+  geom_text(aes(x = action_taken_name, y = 1, label = paste0("(",round(percentage),"%)",sep="")),
+            hjust=0, vjust=.5, size = 2.5, colour = 'black',
+            fontface = 'bold') +
+  labs(x = 'Action', y = 'Percent Count Of Action Taken', title = 'Actions for Loan Application by Race') +
+  coord_flip() + 
+  theme_bw()
+```
+Much better. Here we can notice that the claim we made about denial rates for minorities is high. On top of that, it is more for African Americans.
+
+
+### Applicants  loan amount
+Now as we have looked more into income and decision, lets see how are the loan amounts distributed.
+
+```{r}
+library(moments)
+skew <- paste("Skewness:",skewness(hmda_il_df$loan_amount_000s,na.rm = TRUE))
+ggplot(data = hmda_il_df , aes(x = loan_amount_000s)) + geom_histogram(fill = "steelblue") + labs(title = "Loan amount distribution" , x = "Loan amount in thousands" , y = "Count")+ annotate("text", x = 100000, y = 300000, size = 3.2,label = skew)
+```
+Looks like the data is highly skewed. Lets look at the boxplot 
+```{r}
+ggplot(data = hmda_il_df , aes(x = loan_amount_000s)) + geom_boxplot()+ labs(title = "Loan amount distribution" , x = "Loan amount in thousands" )
+```
+The boxplot suggests that there a lot of outliers and possibly higher loan amounts.
+```{r}
+#install.packages("moments")
+library(moments)
+skewness(hmda_il_df$loan_amount_000s,na.rm = TRUE)
+```
+The data for loan amount is highly right skewed. Changes should be made so that the prediction model does not mess up.
+
+### Handling highly skewed data. Log Transformation
+
+```{r}
+skew <- paste("Skewness:",skewness(log(hmda_il_df$loan_amount_000s),na.rm = TRUE))
+ggplot(data = hmda_il_df , aes(x = log(loan_amount_000s))) + geom_histogram(fill = "steelblue") + labs(title = "Log transformed distribution for Loan amount" , x = "log(Loan Amount)", y = 'Count')+ annotate("text", x = 8, y = 100000, size = 3.2,label = skew)
+```
+
+```{r}
+skewness(log(hmda_il_df$loan_amount_000s),na.rm = TRUE)
+```
+After transforming the values, the data is slightly left skewed but the value is better than without transformation.
+
+### Same is the case with applicants income
+```{r}
+skew <- paste("Skewness:",skewness(hmda_il_df$applicant_income_000s,na.rm = TRUE))
+ggplot(data = hmda_il_df , aes(x = applicant_income_000s)) + geom_histogram(fill = "steelblue") + labs(title = "Applicant Income distribution" , x = "Applicant Income in thousands" , y = "Count") + annotate("text", x = 100000, y = 90000, size = 3.2,label = skew)
+```
+```{r}
+skew <- paste("Skewness:",skewness(log(hmda_il_df$applicant_income_000s),na.rm=TRUE))
+ggplot(data = hmda_il_df , aes(x = log(applicant_income_000s))) + geom_histogram(fill = "steelblue") + labs(title = "Log transformed distribution for Applicant Income" , x = "log(Applicant Income)", y = 'Count') +annotate("text", x = 10, y = 90000, size = 3.2,label = skew)
+```
+
+### Which columns have most values missing?
+
+```{r}
+m<-sapply(hmda_il_df, function(x) sum(is.na(x)))
+temp<-c()
+for (i in 1:length(m)){
+  if(m[i]>0){
+    temp<-c(temp,m[i])
+  }
+}
+missing <- data.frame(temp)
+missing$percent <- (missing$temp / length(hmda_il_df$as_of_year))*100
+missing
+```
+From the dataframe above, we can see that there are a lot of columns with missing values more that 90%. We can't impute these values with very less prior data. Also, these columns would not provide any information while making the decision of whether to grant a loan or not. 
+
+Other perpective to look at this is, a lot of applicants don't have the information about these predictors. So most probably, banks don't use this information to make decision.
+
+Hence, we can get rid of this columns. This can reduce dimensionality of our dataset.
+```{r}
+drop<- c ("applicant_race_2",
+          "applicant_race_3",
+          "applicant_race_4",
+          "applicant_race_5",
+          "co_applicant_race_2",
+          "co_applicant_race_3",
+          "co_applicant_race_4",
+          "co_applicant_race_5",
+          "denial_reason_1",
+          "denial_reason_2",
+          "denial_reason_3",
+          "edit_status_name",
+          "edit_status",
+          "rate_spread",
+          "sequence_number",
+          "application_date_indicator",
+          "as_of_year", # Does not provide extra information which can be used
+          "respondent_id", # Does not provide extra information which can be used
+          "agency_abbr", # Does not provide extra information which can be used
+          "agency_name", # Does not provide extra information which can be used
+          "loan_type_name", # We are only dealing with conventional loans. 
+          "loan_type",
+          "state_abbr",# Not needed as data is of same state
+          "state_code", # Not needed as data is of same state
+          "owner_occupancy_name", # Redundant column. Encoded values present
+          "msamd_name", # Redundant column. Encoded values present
+          "state_name", # Redundant column. Encoded values present
+          "applicant_sex_name", # Redundant column. Encoded values present
+          "hoepa_status_name", # Redundant column. Encoded values present
+          "lien_status_name", # Redundant column. Encoded values present
+          "county_name", # Redundant column. Encoded values present
+          "preapproval_name", # Redundant column. Encoded values present
+          "property_type_name", # Redundant column. Encoded values present
+          "action_taken_name", # Redundant column. Encoded values present
+          "loan_purpose_name", # Redundant column. Encoded values present
+          "purchaser_type_name", # Redundant column. Encoded values present
+          "applicant_ethnicity_name", # Redundant column. Encoded values present
+          "co_applicant_ethnicity_name", # Redundant column. Encoded values present
+          "co_applicant_sex_name" ) # Redundant column. Encoded values present
+hmda_il_df<-hmda_il_df[ , !(names(hmda_il_df) %in% drop)]
+dim(hmda_il_df)
+```
+
+Append a new column which has binary value about the decision. If the application is decides as "Loan Originated" or "Purchased by Institution", it is considered as loan granted with positive value, else the loan is denied, 0.
+```{r}
+hmda_il_df$loan_granted <- ifelse(hmda_il_df$action_taken == 1 | hmda_il_df$action_taken == 6, 1, 0)
+```
+
+
+```{r}
+colnames(hmda_il_df)
+```
+
+
+### Final Thoughts
+
+1. We look at the data and walked through various steps like getting to know the data, find number of missing values, columns that we can use and important features.
+
+2. Regarding the problem of investigation, we can say that there could be some bias while tha application of the laon is being made on the grounds of Race and Ethnicity. We are missing some key information and can't make any legitimate claims. But barely scratching the surface, this is what we see. 
+
+3. Further investigation is needed and by building models, we can see how they perform by taking into account race and ethnicity and by excluding them.
+
+4. There are lot of missing values. We need to handle them and also scale our data so that one feature does not dominate the decsion making. Data Cleaning is gonna be a tiring process but will sure help.
+
+Some colors with their codes which can are used for graphs.
+```{r}
+cbp2 <- c("#000000", "#E69F00", "#56B4E9", "#009E73",          "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+```
+

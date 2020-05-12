@@ -1,0 +1,334 @@
+---
+title: "HMDA_2008_IL_EDA - Initial Analysis for 2007 IL Data"
+author: "Virat Joshi"
+date: "4/5/2020"
+output: html_document
+---
+
+### Set working directory
+```{r}
+#working_dir = "/Users/vjstark/Downloads/CSP-571/Project"
+#setwd(working_dir)
+
+getwd()
+#data_dir <- "./Data"
+
+data_dir <- "D:/data/HMDA"
+
+setwd(dirname(dirname(getwd())))
+
+```
+
+## Load essential Libraries
+```{r}
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(dplyr)
+library(corrplot)
+library(data.table)
+library(mice)
+library(rstudioapi)    
+library(naniar)
+library(e1071)   
+
+source(paste(dirname(dirname(rstudioapi::getActiveDocumentContext()$path)), "utils/utils.r", sep="/"))
+
+source(paste(dirname(dirname(rstudioapi::getActiveDocumentContext()$path)), "utils/model_utils.r", sep="/"))
+
+```
+## Load data file
+```{r}
+#hmda_data_pa <- fread(paste(data_dir, "/hmda_2007_pa_all-records_labels.csv", sep = ""))
+
+hmda_data_pa <- fread(paste(data_dir, "/2007/hmda_2007_pa_all-records_labels.csv", sep = ""))
+```
+## Convert to dataframe
+```{r}
+hmda_pa_df <- as.data.frame(hmda_data_pa)
+head(hmda_pa_df)
+```
+
+
+# Data Analysis Section 1 : Understanding the data
+### Columns in the dataset
+```{r}
+colnames(hmda_pa_df)
+```
+
+### Dimensions of the data
+```{r}
+dim(hmda_pa_df)
+```
+
+### First 10 rows from the data
+```{r}
+head(hmda_pa_df,10)
+```
+
+### Print a glimpse of the dataset
+```{r}
+glimpse(hmda_pa_df)
+```
+
+# Data Analysis Section 2: Missing Values
+We start by finding the number of NAs in the dataset
+```{r}
+sapply(hmda_pa_df,function(x) sum(is.na(x)))
+```
+
+Checking the dataframe for empty strings
+```{r}
+sapply(hmda_pa_df,function(x) sum(x==""))
+```
+
+Check for missing values present as ?
+```{r}
+sapply(hmda_pa_df,function(x) sum(x=="?"))
+```
+
+Check for NULL values
+```{r}
+sapply(hmda_pa_df,function(x) sum(is.null(x)))
+```
+
+# Data Analysis Section 3: Analysis on the columns of interest
+### Columns having the information about applicants Race and Ethnicity, 
+Applicants Ethnicity Values
+```{r}
+unique(hmda_pa_df$applicant_ethnicity_name)
+```
+Applicant Race Encoded Numbers
+```{r}
+unique(hmda_pa_df$applicant_race_1)
+```
+
+Applicant Race Name
+```{r}
+unique(hmda_pa_df$applicant_race_name_1)
+```
+
+Distribution of applicants based on their race
+```{r}
+hmda_pa_df$applicant_race_and_ethnicity <- NA
+hmda_pa_df$co_applicant_race_and_ethnicity <- NA
+
+hmda_pa_df$applicant_race_and_ethnicity <- ifelse(hmda_pa_df$applicant_ethnicity_name == "Hispanic or Latino",
+       "Hispanic or Latino", hmda_pa_df$applicant_race_name_1)
+
+hmda_pa_df$co_applicant_race_and_ethnicity <- ifelse(hmda_pa_df$co_applicant_ethnicity_name == "Hispanic or Latino",
+       "Hispanic or Latino", hmda_pa_df$co_applicant_race_name_1)
+
+hmda_pa_df$applicant_race_and_ethnicity[hmda_pa_df$applicant_race_and_ethnicity == "Information not provided by applicant in mail, Internet, or telephone application"] <- "No Information Provided"
+
+head(hmda_pa_df)
+```
+
+```{r}
+count_racename <- as.data.frame(table(hmda_pa_df$applicant_race_and_ethnicity))
+colnames(count_racename)<-c("Race_and_Ethnicity","Count")
+p<-ggplot(data=count_racename, aes(x=reorder(Race_and_Ethnicity,-Count), y=Count)) + geom_bar(stat="identity",fill="steelblue")+geom_text(aes(label=Count), size=2.5)
+p + coord_flip() +labs(title = "Distribution of applicants by Race and Ethnicity", y="Number of Applicants",x="Race and Ethnicity")
+
+```
+The number of white applicants are comparatively higher in the dataset
+### Applicants Income
+
+Lets dive into the applicants income
+```{r}
+summary(hmda_pa_df$applicant_income_000s)
+```
+Here it can be observed that the income of applicants is spreadout a lot. We have applicants with income ranging from 1 to 9999 in thousands. Also, missing values sum upto 62522.
+
+### Boxplot for the people having income less that 500K
+```{r}
+temp<-as.data.frame(hmda_pa_df$applicant_income_000s[hmda_pa_df$applicant_income_000s<500])
+ggplot(data = temp, aes(x=hmda_pa_df$applicant_income_000s[hmda_pa_df$applicant_income_000s < 500])) +geom_histogram(fill = "steelblue") + labs(title = "Applicant for income below 500K" , x = "Income in thousands",y="Count")
+```
+
+The distribution is right skewed. It would be better if we use median as the measure of central tendency. Lets see what % of applicants have income below 500 from the entire dataset.
+```{r}
+no_of_NAs <- sum(is.na(temp))
+income_below_500<-length(hmda_pa_df$applicant_income_000s[hmda_pa_df$applicant_income_000s<500])
+total_applicants<-length(hmda_pa_df$applicant_income_000s)
+
+((income_below_500 - no_of_NAs ) / total_applicants ) *100
+```
+Approximately 93.16% of the total applicants have income below 500K.
+
+### Applicants according to their race and there median income.
+
+```{r}
+m <- summarise_at(group_by(hmda_pa_df,applicant_race_and_ethnicity),vars(applicant_income_000s),funs(median(.,na.rm=TRUE)))
+ggplot(data = m ,aes (x =  applicant_race_and_ethnicity,y = applicant_income_000s)) + geom_bar(stat = "identity",fill = "steelblue") +geom_text(aes(label=applicant_income_000s), size=3,nudge_y = 5)+ coord_flip()+labs(title = "Median of applicants income by Race and Ethnicity", y="Median Income",x="Race and Ethnicity")
+```
+The mean income for Asians is the highest followed by applicants with no information about race looks high and White. 
+This maybe due to the following reason.
+
+```{r}
+p <- ggplot(group_by(hmda_pa_df,applicant_race_and_ethnicity), aes(x=applicant_race_and_ethnicity, y=applicant_income_000s)) + 
+  geom_boxplot() + labs(title = "Applicants Income According to Race And Ethnicity" , x = "Applicant Race and Ethnicity" , y = "Income distribution in thousands")
+p +coord_flip()
+```
+In the boxplot, the category where people didn’t provide the race and ethnicity data has most extreme values of income. These are probably outliers. This is why the mean of certain categories shifted to the higher end. Lets look in this data
+
+### Distribution of income for the originated loans
+```{r}
+hmda_origination_status_df <- hmda_pa_df[hmda_pa_df$action_taken == "1", ]
+summary(hmda_origination_status_df$applicant_income_000s)
+```
+
+```{r}
+p <- ggplot(group_by(hmda_origination_status_df,applicant_race_and_ethnicity), aes(x=applicant_race_and_ethnicity, y=applicant_income_000s)) + 
+  geom_boxplot() + labs(title = "Approved Loan Applicant's Income Distribution" , x = "Applicant Race and Ethnicity" , y = "Income distribution in thousands")
+p +coord_flip()
+```
+
+```{r}
+m <- summarise_at(group_by(hmda_origination_status_df,applicant_race_and_ethnicity),vars(applicant_income_000s),funs(median(.,na.rm=TRUE)))
+ggplot(data = m ,aes (x =  applicant_race_and_ethnicity,y = applicant_income_000s)) + geom_bar(stat = "identity",fill = "steelblue") +geom_text(aes(label=applicant_income_000s), size=3 , nudge_y = 5)+ coord_flip()+labs(title = "Median of applicants income by Race and Ethnicity", y="Median Income",x="Race and Ethnicity")
+
+```
+
+```{r}
+temp<-as.data.frame(hmda_origination_status_df$applicant_income_000s[hmda_origination_status_df$applicant_income_000s<500])
+
+ggplot(data = temp, aes(x=hmda_origination_status_df$applicant_income_000s[hmda_origination_status_df$applicant_income_000s < 500])) +geom_histogram(fill = "steelblue") + labs(title = "Applicant with loan approved and income below 500K" , x = "Income in thousands",y="Count")
+```
+
+### Proportion of loans originated 
+What are the set of decisions made for an application?
+```{r}
+unique(hmda_pa_df$action_taken_name)
+```
+Here, we can say the loan is denied in two ways. 
+1. Application denied by financial institution
+2. Preapproval request denied by financial institution
+
+The loan is approved if 
+1. "Application approved but not accepted"
+2. "Loan originated"
+
+Other than this, we would classify decision as "Technical or paperwork Issues"
+1. "Application withdrawn by applicant"
+2. "Loan purchased by the institution
+3. "File closed for incompleteness"
+4. "Preapproval request approved but not accepted"
+
+```{r}
+hmda_pa_df$Decision <- NA
+
+hmda_pa_df$Decision <- ifelse(hmda_pa_df$action_taken_name == "Application denied by financial institution" | hmda_pa_df$action_taken_name == "Preapproval request denied by financial institution" , "Denied" ,  ifelse(hmda_pa_df$action_taken_name == "Loan originated" | hmda_pa_df$action_taken_name == "Application approved but not accepted" ,  "Approved" , "Paperwork Issues"))
+      
+tbl <- with(hmda_pa_df, table(Decision,applicant_race_and_ethnicity))
+
+ggplot(as.data.frame(tbl), aes(factor(applicant_race_and_ethnicity), Freq, fill = Decision)) +     
+  geom_col(position = 'dodge') + labs(title = "Proportion of loans denied by financial Institutions",x = "Race and Ethnicity" , y = "Number of applicants") + coord_flip()
+```
+
+```{r}
+tbl <- with(hmda_pa_df, table(action_taken_name,applicant_race_and_ethnicity))
+
+ggplot(as.data.frame(tbl), aes(factor(applicant_race_and_ethnicity), Freq, fill = action_taken_name)) +     
+  geom_col(position = 'dodge') + labs(title = "Proportion of loans denied by financial Institutions",x = "Race and Ethnicity" , y = "Number of applicants") 
+```
+
+```{r}
+mortgage_status_by_race_and_ethnicity <- hmda_pa_df %>% group_by(action_taken_name, applicant_race_and_ethnicity) %>%
+  summarise(ActionCount = n()) %>%
+  arrange(desc(ActionCount))
+
+mortgage_by_race_and_ethnicity = hmda_pa_df %>% group_by(applicant_race_and_ethnicity) %>%
+  summarise(EthnicityCount = n()) %>%
+  arrange(desc(EthnicityCount))
+
+mortgage_status_aggregated_by_race_and_ethnicity  = inner_join(mortgage_status_by_race_and_ethnicity, mortgage_by_race_and_ethnicity) %>% mutate(percentage = (ActionCount / EthnicityCount) * 100)
+
+ggplot(mortgage_status_aggregated_by_race_and_ethnicity, aes(x = reorder(action_taken_name, percentage), 
+                                          y = percentage)) +
+  geom_bar(stat='identity', fill ="#00AFBB") +
+  facet_wrap(~ applicant_race_and_ethnicity) +
+  geom_text(aes(x = action_taken_name, y = 1, label = paste0("(",round(percentage),"%)",sep="")),
+            hjust=0, vjust=.5, size = 2.5, colour = 'black',
+            fontface = 'bold') +
+  labs(x = 'Action', y = 'Percent Count Of Action Taken', title = 'Actions for Loan Application by Race') +
+  coord_flip() + 
+  theme_bw()
+```
+
+Some colors which can be used for graphs
+```{r}
+
+cbp2 <- c("#000000", "#E69F00", "#56B4E9", "#009E73",
+          "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+```
+
+
+### Different Type of Loans
+```{r}
+unique(hmda_pa_df$loan_type_name)
+```
+
+
+```{r}
+ggplot(data = summarise_at(group_by(hmda_pa_df,loan_type_name),vars(loan_type),funs(n())),aes(x = loan_type_name,y =  loan_type)) + geom_bar(stat = "identity",fill = "#009E73") + geom_text(aes(label = loan_type), vjust = -0.5) +labs(title = "Type of Loans Distribution" , x = "Loan Type" , y = "Count")
+```
+
+### Applicants  loan amount
+```{r}
+skew <- paste("Skewness:",skewness(hmda_pa_df$loan_amount_000s,na.rm = TRUE))
+ggplot(data = hmda_pa_df , aes(x = loan_amount_000s)) + geom_histogram(fill = "steelblue") + labs(title = "Loan amount distribution" , x = "Loan amount in thousands" , y = "Count")+ annotate("text", x = 100000, y = 300000, size = 3.2,label = skew)
+```
+
+Looks like the data is highly skewed.
+```{r}
+#install.packages("moments")
+library(moments)
+skewness(hmda_pa_df$loan_amount_000s,na.rm = TRUE)
+```
+The data for loan amount is highly right skewed. Changes should be made so that the prediction model does not mess up.
+
+## Handling highly skewed data. Log Transformation
+```{r}
+skew <- paste("Skewness:",skewness(log(hmda_pa_df$loan_amount_000s),na.rm = TRUE))
+ggplot(data = hmda_pa_df , aes(x = log(loan_amount_000s))) + geom_histogram(fill = "steelblue") + labs(title = "Log transformed distribution for Loan amount" , x = "log(Loan Amount)", y = 'Count')+ annotate("text", x = 8, y = 100000, size = 3.2,label = skew)
+```
+
+```{r}
+skewness(log(hmda_pa_df$loan_amount_000s),na.rm = TRUE)
+```
+After transforming the values, the data is slightly left skewed but the value is better than without transformation.
+### Same is the case with applicants income
+```{r}
+skew <- paste("Skewness:",skewness(hmda_pa_df$applicant_income_000s,na.rm = TRUE))
+ggplot(data = hmda_pa_df , aes(x = applicant_income_000s)) + geom_histogram(fill = "steelblue") + labs(title = "Applicant Income distribution" , x = "Applicant Income in thousands" , y = "Count") + annotate("text", x = 100000, y = 90000, size = 3.2,label = skew)
+```
+
+```{r}
+skew <- paste("Skewness:",skewness(log(hmda_pa_df$applicant_income_000s),na.rm=TRUE))
+ggplot(data = hmda_pa_df , aes(x = log(applicant_income_000s))) + geom_histogram(fill = "steelblue") + labs(title = "Log transformed distribution for Applicant Income" , x = "log(Applicant Income)", y = 'Count') +annotate("text", x = 10, y = 90000, size = 3.2,label = skew)
+```
+
+
+# Visualize missing variables
+```{r}
+
+visualize_missing_values(hmda_pa_df)
+
+```
+
+# Impute as needed.
+```{r}
+
+# https://www.rdocumentation.org/packages/mice/versions/3.8.0/topics/mice.impute.cart
+hmda_data_pa_df_imputed <- mice(hmda_pa_df, m=1, maxit=1, meth='cart',seed=500)
+
+hmda_data_pa_df_imputed <- mice::complete(hmda_data_pa_df_imputed)
+
+```
+
+# Save the imputed dataframe to file.
+```{r}
+
+write.csv(hmda_data_pa_df_imputed, paste(data_dir, "/2007/hmda_2007_pa_imputed.csv", sep = ""), row.names = FALSE)
+```

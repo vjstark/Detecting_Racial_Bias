@@ -1,0 +1,239 @@
+---
+title: "Logistic Regression for Loan Sharks (PA 2007 and 2008)"
+author: "Anantanarayanan G Iyengar"
+date: "4/25/2020"
+output: html_notebook
+---
+
+## We tried the following glm models. The predictors chosen were picked
+## from our EDA analysis and feature engineering work and some background
+## knowledge.
+# Model 1. Log of loan and applicant income.
+# Model 2. Log of loan amount and loan to income ratio.
+
+## Results.
+# Model 1, Model 2 performed similarly. The criterion was AUC 
+# curve, Mcfadden R square value and confusion matrix results on test data.
+
+# Model 2 was chosen as banks do use the loan to income ratio as one of their
+# criterion. 
+
+## Key observation
+# The AUC curve for our models ranges between 83 to 84%. The AUC curve can
+# be thought of as a classification-threshold-invariant. It measures the #
+# quality of the model's predictions irrespective of the threshold value
+# https://developers.google.com/machine-learning/crash-course/classification/roc-and-auc.
+# It is surprising that the models for 2007 and 2008 have higher AUC curves
+# when compared with those for 2014-2017. We feel that this is likely due to
+# the lower lending standards which were rampant during that period.
+
+
+## Global setup like working directory, data directory etc should happen here.
+
+```{r}
+library(sys)
+
+working_directory <- getwd()
+
+setwd(dirname(dirname(working_directory)))
+
+writeLines("")
+getwd()
+# The HMDA dataset is loaded from here.
+data_dir <- "D:/data"
+census_data_dir = "d:/data/census"
+
+# The models are saved in this directory.
+model_path <- paste(dirname(rstudioapi::getActiveDocumentContext()$path), "models", sep = "/")
+print(model_path)
+
+# The train and test data are saved in this directory
+model_data_path <- paste(dirname(rstudioapi::getActiveDocumentContext()$path), "data", sep = "/")
+print(model_data_path)
+
+```
+
+## Install required packages.
+```{r}
+# https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
+list_of_packages <- c("mlbench", "corrplot", "rvest", "tidyr", "stringr", "dplyr", "lubridate", "data.table", "mice", "scales", "naniar", "rpart", "rpart.plot", "caret", "pROC", "ROCR")
+new.packages <- list_of_packages[!(list_of_packages %in% installed.packages()[,"Package"])]
+
+if (length(new.packages)) {
+  print("Installing packages\n")
+  install.packages(new.packages())
+}
+
+library(corrplot)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(dplyr)
+library(data.table)
+library(mice)
+library(rstudioapi)    
+library(naniar)
+library(caret)
+library(pROC)
+library(ROCR)
+
+source(paste(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))), "utils/utils.r", sep="/"))
+
+source(paste(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))), "utils/model_utils.r", sep="/"))
+
+options(scipen = 999)
+
+```
+
+# Load the imputed hmda csv file.
+```{r}
+hmda_data_df_2007 <- fread(paste(data_dir, "/HMDA/2007/hmda_2007_pa_imputed.csv", sep=""))
+hmda_data_df_2007 <- as.data.frame(hmda_data_df_2007)
+
+hmda_data_df_2008 <- fread(paste(data_dir, "/HMDA/2008/hmda_2008_pa_imputed.csv", sep=""))
+hmda_data_df_2008 <- as.data.frame(hmda_data_df_2008)
+```
+
+# Visualize the loaded data frames.
+```{r}
+
+head(hmda_data_df_2007)
+
+head(hmda_data_df_2008)
+
+
+```
+
+
+# Create dataframe based on selected column list from the source dataframe.
+```{r}
+hmda_data_df_for_model_2007 <- hmda_data_frame_for_model(hmda_data_df_2007)
+hmda_data_df_for_model_2007 <- process_model_df_columns(hmda_data_df_for_model_2007)
+
+hmda_data_df_for_model_2008 <- hmda_data_frame_for_model(hmda_data_df_2008)
+hmda_data_df_for_model_2008 <- process_model_df_columns(hmda_data_df_for_model_2008)
+```
+
+# Train/test split.
+```{r}
+set.seed(400)
+
+split_dfs <- train_test_split(hmda_data_df_for_model_2007$loan_granted, hmda_data_df_for_model_2007)
+
+train_2007 <- split_dfs[[1]]
+test_2007 <- split_dfs[[2]]
+
+split_dfs <- train_test_split(hmda_data_df_for_model_2008$loan_granted, hmda_data_df_for_model_2008)
+
+train_2008 <- split_dfs[[1]]
+test_2008 <- split_dfs[[2]]
+
+```
+
+# Null model
+```{r}
+null_model_2007 <- build_and_evaluate_hmda_null_model("loan_granted~1", train_2007, test_2007)
+
+null_model_2008 <- build_and_evaluate_hmda_null_model("loan_granted~1", train_2008, test_2008)
+
+```
+
+# Model with logs of applicant income and loan amount for 2007
+```{r}
+model_2007_log_income_loan_amount <- build_glm_model("loan_granted~applicant_race_and_ethnicity+log_applicant_income_000s+log_loan_amount_000s+preapproval+co_applicant_present+county_code+tract_to_msamd_income+loan_purpose+owner_occupancy+respondent_id+minority_population+rate_spread+agency_code+applicant_sex+property_type", train_2007)
+
+model_summary_and_plot(model_2007_log_income_loan_amount, train_2007)
+mcfadden_r_square(model_2007_log_income_loan_amount, null_model_2007)
+
+```
+
+# Model with logs of loan amount and loan to income ratio for 2007
+```{r}
+model_2007_ratio_of_loan_to_income_with_log_of_income_and_amount <- build_glm_model("loan_granted~applicant_race_and_ethnicity+log_loan_amount_000s+preapproval+co_applicant_present+county_code+tract_to_msamd_income+loan_purpose+owner_occupancy+respondent_id+minority_population+rate_spread+agency_code+applicant_sex+property_type+loan_to_income_ratio", train_2007)
+
+model_summary_and_plot(model_2007_ratio_of_loan_to_income_with_log_of_income_and_amount, train_2007)
+mcfadden_r_square(model_2007_ratio_of_loan_to_income_with_log_of_income_and_amount, null_model_2007)
+
+```
+# Model with logs of applicant income and loan amount for 2008
+```{r}
+model_2008_log_income_loan_amount <- build_glm_model("loan_granted~applicant_race_and_ethnicity+log_applicant_income_000s+log_loan_amount_000s+preapproval+co_applicant_present+county_code+tract_to_msamd_income+loan_purpose+owner_occupancy+respondent_id+minority_population+rate_spread+agency_code+applicant_sex+property_type", train_2008)
+
+model_summary_and_plot(model_2008_log_income_loan_amount, train_2008)
+mcfadden_r_square(model_2008_log_income_loan_amount, null_model_2008)
+
+```
+
+
+# Model with logs of loan amount and loan to income ratio for 2008
+```{r}
+model_2008_ratio_of_loan_to_income_with_log_of_income_and_amount <- build_glm_model("loan_granted~applicant_race_and_ethnicity+log_loan_amount_000s+preapproval+co_applicant_present+county_code+tract_to_msamd_income+loan_purpose+owner_occupancy+respondent_id+minority_population+rate_spread+agency_code+applicant_sex+property_type+loan_to_income_ratio", train_2008)
+
+model_summary_and_plot(model_2008_ratio_of_loan_to_income_with_log_of_income_and_amount, train_2008)
+mcfadden_r_square(model_2008_ratio_of_loan_to_income_with_log_of_income_and_amount, null_model_2008)
+
+```
+
+# Model performance for 2007
+
+```{r}
+library(ROCR)
+library(pROC)
+model1_fitted.probs <- predict(model_2007_log_income_loan_amount, test_2007, type = "response")
+
+model2_fitted.probs <- predict(model_2007_ratio_of_loan_to_income_with_log_of_income_and_amount, test_2007, type = "response")
+
+writeLines("")
+writeLines("Model 1 2007 performance")
+print_model_performance(model1_fitted.probs, test_2007, positive = "yes", negative = "no", threshold = 0.3)
+
+writeLines("")
+writeLines("Model 2 2007 performance")
+print_model_performance(model2_fitted.probs, test_2007, positive = "yes", negative = "no", threshold = 0.3)
+
+```
+
+# Model performance for 2008
+
+```{r}
+library(ROCR)
+library(pROC)
+model3_fitted.probs <- predict(model_2008_log_income_loan_amount, test_2008, type = "response")
+
+model4_fitted.probs <- predict(model_2008_ratio_of_loan_to_income_with_log_of_income_and_amount, test_2008, type = "response")
+
+writeLines("")
+writeLines("Model 1 2008 performance")
+print_model_performance(model3_fitted.probs, test_2008, positive = "yes", negative = "no", threshold = 0.3)
+
+writeLines("")
+writeLines("Model 2 2008 performance")
+print_model_performance(model4_fitted.probs, test_2008, positive = "yes", negative = "no", threshold = 0.3)
+
+```
+
+
+# Save the models
+```{r}
+dir.create(model_path, showWarnings = FALSE)
+save(model_2007_log_income_loan_amount, file = paste(model_path, "/model_2007_log_income_loan_amount.rdata", sep=""))
+save(model_2007_ratio_of_loan_to_income_with_log_of_income_and_amount, file = paste(model_path, "/model_2007_loan_income_ratio_with_log_of_income_and_amount.rdata", sep=""))
+
+save(model_2008_log_income_loan_amount, file = paste(model_path, "/model_2008_log_income_loan_amount.rdata", sep=""))
+save(model_2008_ratio_of_loan_to_income_with_log_of_income_and_amount, file = paste(model_path, "/model_2008_loan_income_ratio_with_log_of_income_and_amount.rdata", sep=""))
+
+```
+
+# Save the train and test data for future reference.
+
+```{r}
+
+dir.create(model_data_path, showWarnings = FALSE)
+save(train_2007, file = paste(model_data_path, "/train_2007.rdata", sep = ""))
+save(test_2007, file = paste(model_data_path, "/test_2007.rdata", sep = ""))
+
+dir.create(model_data_path, showWarnings = FALSE)
+save(train_2008, file = paste(model_data_path, "/train_2008.rdata", sep = ""))
+save(test_2008, file = paste(model_data_path, "/test_2008.rdata", sep = ""))
+
+```

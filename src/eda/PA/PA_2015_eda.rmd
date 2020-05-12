@@ -1,0 +1,475 @@
+---
+title: "Pennsylvania 2015 HMDA EDA"
+author: "Anantanarayanan G Iyengar, Omkar Pawar[Please add your names here]" 
+date: "4/4/2020"
+output: html_notebook
+---
+Here we do exploratory data analysis on HDMA data obtained for Pennsylvania in the year 2015. We will start from looking at the data superficially and then diving into columns of interest. Then we see for any missing values and handle them. Lets get started with the steps. 
+
+## Global setup like working directory, data directory etc should happen here.
+
+
+## Install required packages.
+```{r}
+# https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
+list_of_packages <- c("mlbench", "corrplot", "rvest", "tidyr", "stringr", "dplyr", "lubridate", "data.table", "mice", "scales", "naniar", "rpart", "rpart.plot", "caret", "moments")
+new.packages <- list_of_packages[!(list_of_packages %in% installed.packages()[,"Package"])]
+
+if (length(new.packages)) {
+  print("Installing packages\n")
+  install.packages(new.packages())
+}
+
+library(corrplot)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(dplyr)
+library(data.table)
+library(mice)
+library(rstudioapi)    
+library(moments)
+library(naniar)
+
+source(paste(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))), "utils/utils.r", sep="/"))
+source(paste(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))), "utils/model_utils.r", sep="/"))
+
+
+```
+
+## Load data file.
+```{r}
+data_dir <- "/Users/omkarpawar/Desktop/Data/PA/"
+hmda_data_pa <- fread(paste(data_dir, "hmda_2015_pa_all-records_labels.csv", sep = ""))
+```
+
+## Data analysis section 1. 
+Lets see first few rows of our data and what they tell about the application.
+```{r}
+hmda_data_pa_df <- as.data.frame(hmda_data_pa)
+
+# Filter to include conventional loans only.
+hmda_data_pa_df <- hmda_data_pa_df[hmda_data_pa_df$loan_type == "1", ]
+
+colnames(hmda_data_pa_df)
+
+writeLines("")
+
+head(hmda_data_pa_df, 10)
+
+```
+
+## Data analysis section 2. Print glimpse of dataset i.e a vertical preview of the dataset.
+
+```{r}
+dim(hmda_data_pa_df)
+writeLines("Glimpse of hmda dataset for PA")
+glimpse(hmda_data_pa_df)
+
+```
+
+## Data Analysis Section 3. Check for missing values in the dataset
+Now, lets look at the missing values that are present in our data. We go through this in 4 steps. First we look for any NAs, then empty string, NULL values and at last we look for missing values encoded as “?”
+```{r}
+writeLines("Checking for missing values with NA")
+sapply(hmda_data_pa_df, function(x) sum(is.na(x)))
+
+writeLines("Checking for missing values with empty strings")
+sapply(hmda_data_pa_df, function(x) sum(x == ""))
+
+writeLines("Checking for missing values with ?")
+sapply(hmda_data_pa_df, function(x) sum(x == "?"))
+
+writeLines("Checking for missing values with null")
+sapply(hmda_data_pa_df, function(x) sum(x == NULL))
+
+```
+
+## Look at values in the ethnicity and race columns
+First, we look at race and ethnicity columns and see what information they provide and how is the distribution per variable.
+```{r}
+library(janitor)
+
+writeLines("")
+writeLines("Application ethnicity values")
+unique(hmda_data_pa_df$applicant_ethnicity_name)
+
+writeLines("")
+writeLines("Application race name 1 values")
+unique(hmda_data_pa_df$applicant_race_1)
+unique(hmda_data_pa_df$applicant_race_name_1)
+
+```
+Now, lets group the dataframe by ethnicity not Hispanic and print the count according to race.
+```{r}
+grouped_by_race_info <- hmda_data_pa_df %>% filter(applicant_ethnicity_name == "Hispanic or Latino") %>%
+  group_by(applicant_race_name_1) %>% 
+           count() %>%
+           ungroup() %>%
+           replace(is.na(.), 0) %>% 
+           adorn_totals(c("col")) %>% 
+           arrange(-Total)
+
+head(grouped_by_race_info)
+```
+
+## Add a new column applicant_race_and_ethnicity and group all applicants
+## with ethnicity as Hispanic or Latino as Hispanic or Latino in this column.
+## For everyone else, this column gets values from the applicant_race_name_1 
+## column
+We do this because we want to merge these two columns into one and deal with it as one single predictor.
+```{r}
+hmda_data_pa_df$applicant_race_and_ethnicity <- NA
+hmda_data_pa_df$co_applicant_race_and_ethnicity <- NA
+
+hmda_data_pa_df$applicant_race_and_ethnicity <- ifelse(hmda_data_pa_df$applicant_ethnicity_name == "Hispanic or Latino",
+       "Hispanic or Latino", hmda_data_pa_df$applicant_race_name_1)
+
+hmda_data_pa_df$co_applicant_race_and_ethnicity <- ifelse(hmda_data_pa_df$co_applicant_ethnicity_name == "Hispanic or Latino",
+       "Hispanic or Latino", hmda_data_pa_df$co_applicant_race_name_1)
+
+writeLines("")
+writeLines("Unique values for the applicant_race_and_ethnicity column")
+writeLines("")
+unique(hmda_data_pa_df$applicant_race_and_ethnicity)
+
+head(hmda_data_pa_df)
+
+```
+
+## Graph mortgage distribution by applicant race and ethinicity.
+See how the distroibution is for the loan application according to race and ethnicity. We summarise the count of application according to the applicants race.
+```{r}
+mortgage_by_race_and_ethnicity = hmda_data_pa_df %>% group_by(applicant_race_and_ethnicity) %>%
+  summarise(EthnicityCount = n()) %>%
+  arrange(desc(EthnicityCount))
+
+graph_by_enthicity(mortgage_by_race_and_ethnicity)
+
+```
+
+Now, lets dive even deeper and see how the actions are taken for application for each race and ethnicity category. # Graph which applicant races and ethnicities have the largest proportion of loans # in various stages. These include origination status, denied status, etc.
+
+```{r}
+mortgage_status_by_race_and_ethnicity <- hmda_data_pa_df %>% group_by(action_taken_name, applicant_race_and_ethnicity) %>%
+  summarise(ActionCount = n()) %>%
+  arrange(desc(ActionCount))
+
+mortgage_status_aggregated_by_race_and_ethnicity  = inner_join(mortgage_status_by_race_and_ethnicity, mortgage_by_race_and_ethnicity) %>% mutate(percentage = (ActionCount / EthnicityCount) * 100)
+
+graph_application_race_proportion_of_loans(mortgage_status_aggregated_by_race_and_ethnicity)
+
+```
+
+# Applicant income histograms.
+
+```{r}
+hmda_origination_status_df <- hmda_data_pa_df[hmda_data_pa_df$action_taken == "1", ]
+graph_applicant_income_histogram(hmda_origination_status_df, "Applicant income distribution for originated loans")
+```
+The graph above clearly shows that the denial rate is more for minorities, and to be more specific, it is more for African Americans. One more thing to notice is that the category where applicants race is unknown, most of them are purchased by the institution.
+
+# Graph median income for originated loans.
+Now lets see how the income distriubtion underlies for applicants. Lets see the median income for each category.
+```{r}
+hmda_origination_status_df <- hmda_data_pa_df[hmda_data_pa_df$action_taken == "1", ]
+
+head(hmda_origination_status_df)
+
+hmda_origination_status_df %>% ggplot(aes(as.numeric(hud_median_family_income))) +
+geom_histogram(binwidth = 1000,, fill=c("blue")) + labs(x = "Median Income", y = "Applicant Count", title = "Median Income Distribution for Area for Originated Loans") + theme_bw()
+```
+We see that Asians have the largest median income value amongst all. At the bottom, we have African Americans and Hispanic or Latino
+
+
+## Graph loan distribution by county.
+
+```{r}
+mortgage_distribution_by_counties <- hmda_data_pa_df %>%
+  filter(!is.na(county_name)) %>%
+  group_by(county_name) %>%
+  summarise(CountLoans = n() ) %>%
+  mutate(percentage = ( CountLoans / sum(CountLoans) ) * 100 ) %>%
+  mutate(county_name = reorder(county_name, percentage)) %>%
+  arrange(desc(percentage)) %>%
+  head(20)
+
+graph_distribution_by_county(mortgage_distribution_by_counties)
+
+originated_mortgage_distribution_by_counties <- hmda_origination_status_df %>%
+  filter(!is.na(county_name)) %>%
+  group_by(county_name) %>%
+  summarise(CountLoans = n() ) %>%
+  mutate(percentage = ( CountLoans / sum(CountLoans) ) *100 ) %>%
+  mutate(county_name = reorder(county_name, percentage)) %>%
+  arrange(desc(percentage)) %>%
+  head(20)
+
+graph_distribution_by_county(originated_mortgage_distribution_by_counties)
+
+```
+
+## Graph home loan application distribution for the top 4 counties in the above chart by applicant_race_1
+```{r}
+
+county_names <- c("Allegheny County", "Philadelphia County", "Montgomery County", "Bucks County")
+
+for (county_name in county_names) {
+  
+  hmda_data_county_df <- hmda_data_pa_df[hmda_data_pa_df$county_name == county_name, ]
+  
+  mortgage_by_race_county <- hmda_data_county_df %>% group_by(applicant_race_name_1) %>%
+    summarise(RaceCount = n()) %>% arrange(desc(RaceCount))
+  
+  print(graph_mortgage_distribution_by_race1(mortgage_by_race_county))
+}
+
+```
+
+## Graph income distribution for Whites and African Americans per county for the top 4 counties above.
+
+```{r}
+
+for (county_name in county_names) {
+  hmda_origination_status_df_by_county_white <- hmda_data_pa_df[hmda_data_pa_df$action_taken == "1" & hmda_data_pa_df$county_name == county_name & hmda_data_pa_df$applicant_race_name_1 == "White", ]
+  print(graph_applicant_income_histogram(hmda_origination_status_df_by_county_white, "Income distribution for Whites"))
+
+  hmda_origination_status_df_by_county_african_american <- hmda_data_pa_df[hmda_data_pa_df$action_taken == "1" & hmda_data_pa_df$county_name == county_name & hmda_data_pa_df$applicant_race_name_1 == "Black or African American", ]
+  print(graph_applicant_income_histogram(hmda_origination_status_df_by_county_african_american, "Income distribution for African Americans"))
+}
+
+```
+
+## Graph home loan application distribution for the top 4 counties in the above chart by applicant_race_and_ethnicity
+```{r}
+
+county_names <- c("Allegheny County", "Philadelphia County", "Montgomery County", "Bucks County")
+
+for (county_name in county_names) {
+  
+  hmda_data_county_df <- hmda_data_pa_df[hmda_data_pa_df$county_name == county_name, ]
+  
+  mortgage_by_race_county <- hmda_data_county_df %>% group_by(applicant_race_and_ethnicity) %>%
+    summarise(RaceCount = n()) %>% arrange(desc(RaceCount))
+  
+  print(graph_mortgage_distribution_by_race_and_ethnicity(mortgage_by_race_county))
+}
+
+```
+
+# Graph which communities have the largest proportion of loans in various stages.
+# for the top 4 counties listed above.
+# These include origination status, denied status, etc.
+
+```{r}
+
+for (county_name in county_names) {
+  
+  hmda_data_county_df <- hmda_data_pa_df[hmda_data_pa_df$county_name == county_name, ]
+  
+  mortgage_by_race1_county <- hmda_data_county_df %>% group_by(applicant_race_and_ethnicity) %>%
+    summarise(RaceCount = n()) %>% arrange(desc(RaceCount))
+
+  mortgage_status_by_race1_by_county <- hmda_data_county_df %>% group_by(action_taken_name, applicant_race_and_ethnicity) %>%
+    summarise(ActionCount = n()) %>%
+    arrange(desc(ActionCount))
+  
+  mortgage_status_aggregated_by_race1_by_county  = inner_join(mortgage_status_by_race1_by_county, mortgage_by_race1_county) %>% mutate(percentage = (ActionCount / RaceCount) * 100)
+  
+  print(graph_application_race_and_ethnicity_proportion_of_loans(mortgage_status_aggregated_by_race1_by_county))
+}
+
+```
+
+# Visualize missing variables
+Now we start looking at the missing values and see how can we deal with them .So here, we try and vizualize the missing values
+```{r}
+# https://cran.r-project.org/web/packages/naniar/vignettes/naniar-visualisation.html
+gg_miss_upset(hmda_data_pa_df)
+
+```
+In this graph, we see the missing value count for each column and for each category too. There are alot of missing in some columns like co applicant and applicant 2-3-4 race.
+
+# Impute as needed.
+```{r}
+
+# https://www.rdocumentation.org/packages/mice/versions/3.8.0/topics/mice.impute.cart
+hmda_data_pa_df_imputed <- mice(hmda_data_pa_df, m=1, maxit=2, meth='cart',seed=500)
+
+hmda_data_pa_df_imputed <- mice::complete(hmda_data_pa_df_imputed)
+
+```
+
+## More analysis on the imputed dataset.
+```{r}
+
+summary(hmda_data_pa_df_imputed)
+
+gg_miss_upset(hmda_data_pa_df_imputed)
+
+```
+# Additional analysis on the hmda dataset. correlation matrix, plots, etc.
+# Loan to income ratio
+Banks use this a lot of times when they have to look at how much the applicant income is how much loan they have applied to. So its a good variable to give the extra information about the application.
+```{r}
+# https://stackoverflow.com/questions/20637360/convert-all-data-frame-character-columns-to-factors
+hmda_data_pa_df$loan_to_income_ratio <- hmda_data_pa_df$loan_amount_000s / hmda_data_pa_df$applicant_income_000s
+
+hmda_data_pa_df[sapply(hmda_data_pa_df, is.character)] <- lapply(hmda_data_pa_df[sapply(hmda_data_pa_df, is.character)], 
+                                       as.factor)
+
+hmda_data_pa_df_for_correlation <- as.data.frame(lapply(hmda_data_pa_df, as.integer))
+
+#head(hmda_data_pa_df_for_correlation[, c("applicant_income_000s", "loan_amount_000s")])
+
+head(hmda_data_pa_df_for_correlation)
+
+corr_simple(hmda_data_pa_df_for_correlation)
+
+corrplot(cor(hmda_data_pa_df_for_correlation[, c("applicant_income_000s", "loan_amount_000s")], use = "na.or.complete"))
+
+```
+
+
+# Additional analysis on the hmda imputed dataset. correlation plots, etc.
+```{r}
+# hmda_data_pa_df_imputed <- hmda_data_pa_df;
+# https://stackoverflow.com/questions/20637360/convert-all-data-frame-character-columns-to-factors
+hmda_data_pa_df_imputed$loan_to_income_ratio <- hmda_data_pa_df_imputed$loan_amount_000s / hmda_data_pa_df_imputed$applicant_income_000s
+
+hmda_data_pa_df_imputed[sapply(hmda_data_pa_df_imputed, is.character)] <- lapply(hmda_data_pa_df_imputed[sapply(hmda_data_pa_df_imputed, is.character)], 
+                                       as.factor)
+
+hmda_data_pa_df_imputed_for_correlation <- as.data.frame(lapply(hmda_data_pa_df_imputed, as.integer))
+
+head(hmda_data_pa_df_imputed_for_correlation[, c("applicant_income_000s", "loan_amount_000s")])
+
+corr_simple(hmda_data_pa_df_imputed_for_correlation)
+
+corrplot(cor(hmda_data_pa_df_imputed_for_correlation[, c("applicant_income_000s", "loan_amount_000s")], use = "na.or.complete"))
+
+```
+
+# Relationship between race and approved loans.
+```{r}
+
+hmda_model_df <- hmda_data_frame_for_model(hmda_data_pa_df_imputed)
+hmda_model_df <- process_model_df_columns(hmda_model_df)
+
+l <- ggplot(hmda_model_df, aes(applicant_race_and_ethnicity,fill = loan_granted))
+l <- l + geom_histogram(stat="count") + coord_flip()
+print(l)
+
+
+```
+
+# Relationship between loan purpose and loan action.
+```{r}
+l <- ggplot(hmda_model_df, aes(loan_purpose, fill = loan_granted))
+l <- l + geom_histogram(stat="count") + coord_flip()
+print(l)
+
+```
+
+```{r}
+plot(hmda_model_df$loan_granted, main="Loan granted Variable",
+     col=colors()[100:102],
+     xlab="Loan distribution")
+
+```
+
+### Applicants  loan amount
+```{r}
+skew <- paste("Skewness:",skewness(hmda_model_df$loan_amount_000s,na.rm = TRUE))
+ggplot(data = hmda_model_df , aes(x = loan_amount_000s)) + geom_histogram(fill = "steelblue") + labs(title = "Loan amount distribution" , x = "Loan amount in thousands" , y = "Count")+ annotate("text", x = 100000, y = 300000, size = 3.2,label = skew)
+```
+
+Looks like the data is highly skewed.
+```{r}
+#install.packages("moments")
+library(moments)
+skewness(hmda_model_df$loan_amount_000s,na.rm = TRUE)
+```
+
+
+The data for loan amount is highly right skewed. Changes should be made so that the prediction model does not mess up.
+
+## Handling highly skewed data. Log Transformation
+```{r}
+skew <- paste("Skewness:",skewness(log(hmda_model_df$loan_amount_000s),na.rm = TRUE))
+ggplot(data = hmda_model_df , aes(x = log(loan_amount_000s))) + geom_histogram(fill = "steelblue") + labs(title = "Log transformed distribution for Loan amount" , x = "log(Loan Amount)", y = 'Count')+ annotate("text", x = 8, y = 100000, size = 3.2,label = skew)
+```
+
+```{r}
+skewness(log(hmda_model_df$loan_amount_000s),na.rm = TRUE)
+```
+
+# Boxplot of log of loan amounts.
+```{r}
+boxplot(log(hmda_model_df$loan_amount_000s),col = colors()[100:109],
+        main = "Boxplot of Log of Loan Amounts",
+        xlab="Loan Amount",
+        ylab="Distribution of Log of Loan Amounts")
+```
+
+### Same is the case with applicants income
+```{r}
+skew <- paste("Skewness:",skewness(hmda_model_df$applicant_income_000s,na.rm = TRUE))
+ggplot(data = hmda_model_df , aes(x = applicant_income_000s)) + geom_histogram(fill = "steelblue") + labs(title = "Applicant Income distribution" , x = "Applicant Income in thousands" , y = "Count") + annotate("text", x = 100000, y = 90000, size = 3.2,label = skew)
+```
+
+```{r}
+skew <- paste("Skewness:",skewness(log(hmda_model_df$applicant_income_000s),na.rm=TRUE))
+ggplot(data = hmda_model_df , aes(x = log(applicant_income_000s))) + geom_histogram(fill = "steelblue") + labs(title = "Log transformed distribution for Applicant Income" , x = "log(Applicant Income)", y = 'Count') +annotate("text", x = 10, y = 90000, size = 3.2,label = skew)
+```
+
+
+# Box plots for log of loan amounts vs decision
+```{r}
+
+boxplot(log(loan_amount_000s)~loan_granted, xlab="Loan decision",ylab="Log of Loan Amounts",col=c("pink","lightblue"),
+        main="Exploratory Data Analysis Plot\n of Loan Decision Versus Log of Loan Amounts", data = hmda_model_df)
+
+```
+
+# Box plots for log of loan amounts vs decision
+```{r}
+
+boxplot(log(applicant_income_000s)~loan_granted, xlab="Loan decision",ylab="Log of Applicant Income",col=c("pink","lightblue"),
+        main="Exploratory Data Analysis Plot\n of Loan Decision Versus Log of Applicant Income", data = hmda_model_df)
+
+```
+ 
+# Plot for log of applicant income, race and ethnicity with color by loan decision. 
+```{r}
+ggplot(hmda_model_df, aes(log(applicant_income_000s), applicant_race_and_ethnicity, color = loan_granted)) + 
+  geom_jitter() +
+  ggtitle("Log of Applicant income vs. Applicant race and ethnicity , by  color = Loan decision") +
+  theme_light()
+
+```
+
+# Plot for log of loan amounts, race and ethnicity with color by loan decision. 
+```{r}
+ggplot(hmda_model_df, aes(log(loan_amount_000s), applicant_race_and_ethnicity, color = loan_granted)) + 
+  geom_jitter() +
+  ggtitle("Log of loan amount vs. Applicant race and ethnicity , by  color = Loan decision") +
+  theme_light()
+
+```
+
+# Plot for loan to income ratio, race and ethnicity with color by loan decision. 
+```{r}
+
+ggplot(hmda_model_df, aes(loan_to_income_ratio, applicant_race_and_ethnicity, color = loan_granted)) + 
+  geom_jitter() +
+  ggtitle("Loan to Income ratio vs. Applicant race and ethnicity , by  color = Loan decision") +
+  theme_light()
+
+```
+
+# Save the imputed dataframe to file.
+```{r}
+
+write.csv(hmda_data_pa_df_imputed, paste(data_dir, "/2015/hmda_2015_pa_imputed.csv", sep = ""), row.names = FALSE)
+```

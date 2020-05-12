@@ -1,0 +1,562 @@
+ ---
+title: "CSP571_Project_Experimentation for Pennsylvania conventional home loans for 2015"
+authors: "Anantanarayanan G Iyengar, [Please add your names here]"
+date: "2/17/2020"
+output: html_notebook
+---
+
+## Global setup like working directory, data directory etc should happen here.
+```{r}
+# Please change the working directory as needed.
+working_dir <- "D:/illinois/csp571/csp-571-02-final-project"
+setwd(working_dir)
+
+data_dir <- "D:/data/HMDA"
+```
+
+## Install required packages.
+```{r}
+# https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
+list_of_packages <- c("mlbench", "corrplot", "rvest", "tidyr", "stringr", "dplyr", "lubridate", "data.table", "mice", "naniar")
+new.packages <- list_of_packages[!(list_of_packages %in% installed.packages()[,"Package"])]
+
+if (length(new.packages)) {
+  print("Installing packages\n")
+  install.packages(new.packages())
+}
+
+library(corrplot)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(dplyr)
+library(data.table)
+library(mice)
+library(naniar)
+library(rstudioapi)    
+
+source(paste(dirname(dirname(rstudioapi::getActiveDocumentContext()$path)), "utils/utils.r", sep="/"))
+
+```
+
+## Load data file.
+```{r}
+hmda_data_pa <- fread(paste(data_dir, "/2015/hmda_2015_pa_all-records_labels.csv", sep = ""))
+```
+
+## Data analysis section 1. Print column names and first 10 rows of dataset.
+```{r}
+hmda_data_pa_df <- as.data.frame(hmda_data_pa)
+
+hmda_data_pa_df <- hmda_data_pa_df[hmda_data_pa_df$loan_type == "1", ]
+
+colnames(hmda_data_pa_df)
+
+writeLines("")
+
+summary(hmda_data_pa_df)
+
+head(hmda_data_pa_df, 10)
+```
+
+## Data analysis section 2. Print glimpse of dataset i.e a vertical preview of the dataset.
+```{r}
+dim(hmda_data_pa_df)
+writeLines("Glimpse of hmda dataset for PA")
+glimpse(hmda_data_pa_df)
+
+```
+
+## Data analysis section 2. Print structure of dataset.
+
+```{r}
+str(hmda_data_pa_df)
+
+```
+
+## Data Analysis Section 3. Check for missing values in the dataset
+```{r}
+writeLines("Checking for missing values with NA")
+sapply(hmda_data_pa_df, function(x) sum(is.na(x)))
+
+writeLines("Checking for missing values with empty strings")
+sapply(hmda_data_pa_df, function(x) sum(x == ""))
+
+```
+
+## Look at values in the ethnicity and race columns
+
+```{r}
+library(janitor)
+writeLines("Application ethnicity values")
+levels(as.factor(hmda_data_pa_df$applicant_ethnicity_name))
+
+writeLines("Application race name 1 values")
+levels(as.factor(hmda_data_pa_df$applicant_race_1))
+levels(as.factor(hmda_data_pa_df$applicant_race_name_1))
+
+hmda_data_pa_df %>% filter(applicant_ethnicity_name == "Hispanic or Latino") %>%
+  group_by(applicant_race_name_1) %>% 
+           count() %>%
+           ungroup() %>%
+           replace(is.na(.), 0) %>% 
+           adorn_totals(c("col")) %>% 
+           arrange(-Total)
+```
+## Add a new column applicant_race_and_ethnicity and group all applicants
+## with ethnicity as Hispanic or Latino as Hispanic or Latino in this column.
+## For everyone else, this column gets values from the applicant_race_name_1 
+## column
+
+```{r}
+hmda_data_pa_df$applicant_race_and_ethnicity <- NA
+hmda_data_pa_df$co_applicant_race_and_ethnicity <- NA
+
+hmda_data_pa_df$applicant_race_and_ethnicity <- ifelse(hmda_data_pa_df$applicant_ethnicity_name == "Hispanic or Latino",
+       "Hispanic or Latino", hmda_data_pa_df$applicant_race_name_1)
+
+hmda_data_pa_df$co_applicant_race_and_ethnicity <- ifelse(hmda_data_pa_df$co_applicant_ethnicity_name == "Hispanic or Latino",
+       "Hispanic or Latino", hmda_data_pa_df$co_applicant_race_name_1)
+
+#hmda_data_pa_df$applicant_race_and_ethnicity <- hmda_data_pa_df$applicant_race_and_ethnicity
+
+#hmda_data_pa_df$co_applicant_race_and_ethnicity <- hmda_data_pa_df$co_applicant_race_and_ethnicity
+
+head(hmda_data_pa_df)
+
+unique(hmda_data_pa_df$applicant_race_and_ethnicity)
+```
+
+## Graph mortgage distribution by applicant race and ethinicity.
+```{r}
+mortgage_by_race_and_ethnicity = hmda_data_pa_df %>% group_by(applicant_race_and_ethnicity) %>%
+  summarise(EthnicityCount = n()) %>%
+  arrange(desc(EthnicityCount))
+
+graph_by_enthicity(mortgage_by_race_and_ethnicity)
+```
+
+# Graph which applicant races and ethnicities have the largest proportion of loans
+# in various stages. These include origination status, denied status, etc.
+
+```{r}
+mortgage_status_by_race_and_ethnicity <- hmda_data_pa_df %>% group_by(action_taken_name, applicant_race_and_ethnicity) %>%
+  summarise(ActionCount = n()) %>%
+  arrange(desc(ActionCount))
+
+mortgage_status_aggregated_by_race_and_ethnicity  = inner_join(mortgage_status_by_race_and_ethnicity, mortgage_by_race_and_ethnicity) %>% mutate(percentage = (ActionCount / EthnicityCount) * 100)
+
+graph_application_race_proportion_of_loans(mortgage_status_aggregated_by_race_and_ethnicity)
+
+```
+
+# Applicant income histograms.
+
+```{r}
+hmda_origination_status_df <- hmda_data_pa_df[hmda_data_pa_df$action_taken == "1", ]
+graph_applicant_income_histogram(hmda_origination_status_df, "Applicant income distribution for originated loans")
+```
+
+# Graph median income for originated loans.
+```{r}
+hmda_origination_status_df <- hmda_data_pa_df[hmda_data_pa_df$action_taken == "1", ]
+
+head(hmda_origination_status_df)
+
+hmda_origination_status_df %>% ggplot(aes(as.numeric(hud_median_family_income))) +
+geom_histogram(binwidth = 1000,, fill=c("blue")) + labs(x = "Median Income", y = "Applicant Count", title = "Median Income Distribution for Area for Originated Loans") + theme_bw()
+```
+
+## Graph loan distribution by county.
+
+```{r}
+mortgage_distribution_by_counties <- hmda_data_pa_df %>%
+  filter(!is.na(county_name)) %>%
+  group_by(county_name) %>%
+  summarise(CountLoans = n() ) %>%
+  mutate(percentage = ( CountLoans / sum(CountLoans) ) * 100 ) %>%
+  mutate(county_name = reorder(county_name, percentage)) %>%
+  arrange(desc(percentage)) %>%
+  head(20)
+
+graph_distribution_by_county(mortgage_distribution_by_counties)
+
+originated_mortgage_distribution_by_counties <- hmda_origination_status_df %>%
+  filter(!is.na(county_name)) %>%
+  group_by(county_name) %>%
+  summarise(CountLoans = n() ) %>%
+  mutate(percentage = ( CountLoans / sum(CountLoans) ) *100 ) %>%
+  mutate(county_name = reorder(county_name, percentage)) %>%
+  arrange(desc(percentage)) %>%
+  head(20)
+
+graph_distribution_by_county(originated_mortgage_distribution_by_counties)
+
+```
+
+## Graph home loan application distribution for the top 4 counties in the above
+## chart by applicant_race_1
+```{r}
+
+county_names <- c("Allegheny County", "Philadelphia County", "Montgomery County", "Bucks County")
+
+for (county_name in county_names) {
+  
+  hmda_data_county_df <- hmda_data_pa_df[hmda_data_pa_df$county_name == county_name, ]
+  
+  mortgage_by_race_county <- hmda_data_county_df %>% group_by(applicant_race_name_1) %>%
+    summarise(RaceCount = n()) %>% arrange(desc(RaceCount))
+  
+  print(graph_mortgage_distribution_by_race1(mortgage_by_race_county))
+}
+
+```
+
+# Graph which communities have the largest proportion of loans in various stages.
+# for the top 4 counties listed above.
+# These include origination status, denied status, etc.
+
+```{r}
+
+for (county_name in county_names) {
+  
+  hmda_data_county_df <- hmda_data_pa_df[hmda_data_pa_df$county_name == county_name, ]
+  
+  mortgage_by_race1_county <- hmda_data_county_df %>% group_by(applicant_race_and_ethnicity) %>%
+    summarise(RaceCount = n()) %>% arrange(desc(RaceCount))
+
+  mortgage_status_by_race1_by_county <- hmda_data_county_df %>% group_by(action_taken_name, applicant_race_and_ethnicity) %>%
+    summarise(ActionCount = n()) %>%
+    arrange(desc(ActionCount))
+  
+  mortgage_status_aggregated_by_race1_by_county  = inner_join(mortgage_status_by_race1_by_county, mortgage_by_race1_county) %>% mutate(percentage = (ActionCount / RaceCount) * 100)
+  
+  print(graph_application_race_and_ethnicity_proportion_of_loans(mortgage_status_aggregated_by_race1_by_county))
+}
+
+```
+
+## Graph income distribution for Whites and African Americans per county for the
+## top 4 counties above.
+```{r}
+
+for (county_name in county_names) {
+  hmda_origination_status_df_by_county_white <- hmda_data_pa_df[hmda_data_pa_df$action_taken == "1" & hmda_data_pa_df$county_name == county_name & hmda_data_pa_df$applicant_race_and_ethnicity == "White", ]
+  print(graph_applicant_income_histogram(hmda_origination_status_df_by_county_white, "Income distribution for whites"))
+
+  hmda_origination_status_df_by_county_african_american <- hmda_data_pa_df[hmda_data_pa_df$action_taken == "1" & hmda_data_pa_df$county_name == county_name & hmda_data_pa_df$applicant_race_and_ethnicity == "Black or African American", ]
+  print(graph_applicant_income_histogram(hmda_origination_status_df_by_county_african_american, "Income distribution for African Americans"))
+}
+
+```
+
+
+## Graph home loan application distribution for the top 4 counties in the above
+## chart by applicant_race_and_ethnicity
+```{r}
+
+county_names <- c("Allegheny County", "Philadelphia County", "Montgomery County", "Bucks County")
+
+for (county_name in county_names) {
+  
+  hmda_data_county_df <- hmda_data_pa_df[hmda_data_pa_df$county_name == county_name, ]
+  
+  mortgage_by_race_county <- hmda_data_county_df %>% group_by(applicant_race_and_ethnicity) %>%
+    summarise(RaceCount = n()) %>% arrange(desc(RaceCount))
+  
+  print(graph_mortgage_distribution_by_race_and_ethnicity(mortgage_by_race_county))
+}
+
+```
+
+# Graph which communities have the largest proportion of loans in various stages.
+# for the top 4 counties listed above.
+# These include origination status, denied status, etc.
+
+```{r}
+for (county_name in county_names) {
+  
+  hmda_data_county_df <- hmda_data_pa_df[hmda_data_pa_df$county_name == county_name, ]
+  
+  mortgage_by_race1_county <- hmda_data_county_df %>% group_by(applicant_race_and_ethnicity) %>%
+    summarise(RaceCount = n()) %>% arrange(desc(RaceCount))
+
+  mortgage_status_by_race1_by_county <- hmda_data_county_df %>% group_by(action_taken_name, applicant_race_and_ethnicity) %>%
+    summarise(ActionCount = n()) %>%
+    arrange(desc(ActionCount))
+  
+  mortgage_status_aggregated_by_race1_by_county  = inner_join(mortgage_status_by_race1_by_county, mortgage_by_race1_county) %>% mutate(percentage = (ActionCount / RaceCount) * 100)
+  
+  print(graph_application_race_and_ethnicity_proportion_of_loans(mortgage_status_aggregated_by_race1_by_county))
+}
+```
+## Visualize missing variables and impute as needed.
+
+```{r}
+library(mice)
+library(naniar)
+
+# https://cran.r-project.org/web/packages/naniar/vignettes/naniar-visualisation.html
+gg_miss_upset(hmda_data_pa_df)
+
+hmda_data_pa_df_imputed <- mice(hmda_data_pa_df, m=1, maxit=2, meth='cart',seed=500)
+
+hmda_data_pa_df_imputed <- mice::complete(hmda_data_pa_df_imputed)
+```
+
+
+## More analysis on the imputed dataset.
+```{r}
+summary(hmda_data_pa_df_imputed)
+gg_miss_upset(hmda_data_pa_df_imputed)
+```
+
+# Additional analysis on the hmda dataset. correlation matrix, plots, etc.
+```{r}
+# https://stackoverflow.com/questions/20637360/convert-all-data-frame-character-columns-to-factors
+hmda_data_pa_df$loan_to_income_ratio <- hmda_data_pa_df$loan_amount_000s / hmda_data_pa_df$applicant_income_000s
+
+hmda_data_pa_df[sapply(hmda_data_pa_df, is.character)] <- lapply(hmda_data_pa_df[sapply(hmda_data_pa_df, is.character)], 
+                                       as.factor)
+
+hmda_data_pa_df_for_correlation <- as.data.frame(lapply(hmda_data_pa_df, as.integer))
+
+#head(hmda_data_pa_df_for_correlation[, c("applicant_income_000s", "loan_amount_000s")])
+
+head(hmda_data_pa_df_for_correlation)
+
+corr_simple(hmda_data_pa_df_for_correlation)
+
+corrplot(cor(hmda_data_pa_df_for_correlation[, c("applicant_income_000s", "loan_amount_000s")], use = "na.or.complete"))
+
+```
+
+# Additional analysis on the hmda imputed dataset. correlation plots, etc.
+```{r}
+# hmda_data_pa_df_imputed <- hmda_data_pa_df;
+# https://stackoverflow.com/questions/20637360/convert-all-data-frame-character-columns-to-factors
+hmda_data_pa_df_imputed$loan_to_income_ratio <- hmda_data_pa_df_imputed$loan_amount_000s / hmda_data_pa_df_imputed$applicant_income_000s
+
+hmda_data_pa_df_imputed[sapply(hmda_data_pa_df_imputed, is.character)] <- lapply(hmda_data_pa_df_imputed[sapply(hmda_data_pa_df_imputed, is.character)], 
+                                       as.factor)
+
+hmda_data_pa_df_imputed_for_correlation <- as.data.frame(lapply(hmda_data_pa_df_imputed, as.integer))
+
+head(hmda_data_pa_df_imputed_for_correlation[, c("applicant_income_000s", "loan_amount_000s")])
+
+corr_simple(hmda_data_pa_df_imputed_for_correlation)
+
+corrplot(cor(hmda_data_pa_df_imputed_for_correlation[, c("applicant_income_000s", "loan_amount_000s")], use = "na.or.complete"))
+
+```
+
+# Save the imputed dataframe to file.
+```{r}
+write.csv(hmda_data_pa_df_imputed, "D:/data/HMDA/2015/hmda_2015_pa_imputed.csv", row.names = FALSE)
+```
+
+## Initial Model
+## Selecting Columns
+
+```{r}
+data_frame_for_model <- function(input_df) {
+  # Added based on intuition. Please update as needed.
+  # msamd -> Metropolitan Statistical Area Division code.
+  # https://cfpb.github.io/api/hmda/fields.html
+  initial_columns_for_model <- c("applicant_race_and_ethnicity", "applicant_income_000s", "co_applicant_sex", "county_code", "hoepa_status", "lien_status", "msamd", "owner_occupancy", "preapproval", "property_type", "purchaser_type", "loan_amount_000s", "county_name", "applicant_sex", "hud_median_family_income", "tract_to_msamd_income", "loan_to_income_ratio", "agency_code")
+
+  # https://stackoverflow.com/questions/10085806/extracting-specific-columns-from-a-data-frame
+  df_for_model <- input_df %>% select(initial_columns_for_model)
+  df_for_model$loan_granted <- input_df$action_taken == 1 | input_df$action_taken == 6
+  return (df_for_model)
+}
+```
+
+
+# Create dataframe based on selected column list from the source dataframe.
+
+```{r}
+hmda_data_pa_df_imputed_for_model <- data_frame_for_model(hmda_data_pa_df_imputed)
+```
+
+
+```{r}
+unique(hmda_data_pa_df_imputed$applicant_race_and_ethnicity)
+```
+
+
+```{r}
+nrow(hmda_data_pa_df_imputed_for_model)
+```
+## Training and Testing Set.
+We use Stratified Sampling on the predictor whether loan is granted or not.
+
+```{r}
+train_test_split <- function(input_df, train_proportion = 0.8) {
+  library(caret)
+  
+  # https://stackoverflow.com/questions/20776887/stratified-splitting-the-data
+  train.index <- createDataPartition(input_df$loan_granted, p = train_proportion, list = FALSE)
+
+  train <- input_df[train.index, ]
+  test <-  input_df[-train.index, ]
+  
+  train$loan_granted <- as.factor(train$loan_granted)
+  test$loan_granted <- as.factor(test$loan_granted)
+  
+  val_list <- list(train, test)
+  return (val_list)
+}
+```
+
+
+```{r}
+writeLines("Number of Applicants granted loan")
+print(sum(hmda_data_pa_df_imputed_for_model$loan_granted == TRUE))
+
+writeLines("Number of Applicants granted denied")
+print(sum(hmda_data_pa_df_imputed_for_model$loan_granted == FALSE))
+
+print(nrow(hmda_data_pa_df_imputed))
+```
+
+
+```{r}
+split_dfs <- train_test_split(hmda_data_pa_df_imputed_for_model[, -which(names(hmda_data_pa_df_imputed_for_model) %in% c("co_applicant_race_and_ethnicity", "county_name"))])
+train <- split_dfs[[1]]
+test <- split_dfs[[2]]
+
+head(train)
+```
+
+
+```{r}
+levels(hmda_data_pa_df_imputed_for_model$applicant_race_and_ethnicity)
+```
+
+## Race and ethnicity numbers for whites and African Americans
+```{r}
+sum(train$applicant_race_and_ethnicity == "White")
+```
+
+
+```{r}
+```
+
+
+```{r}
+sum(train$applicant_race_and_ethnicity == "Black or African American")
+```
+### Generating upsampled training dataframe based on race and ethnicity
+```{r}
+set.seed(1000)
+
+up_train <- upSample(x = train, y = train$applicant_race_and_ethnicity)
+
+sum(as.character(up_train$applicant_race_and_ethnicity) == "White")
+
+sum(as.character(up_train$applicant_race_and_ethnicity) == "Black or African American")
+```
+
+
+```{r}
+nrow(up_train)
+```
+
+
+```{r}
+sum(test$applicant_race_and_ethnicity == "White")
+sum(test$applicant_race_and_ethnicity == "Black or African American")
+nrow(test)
+```
+
+# Data Models
+## Model 1: Without using loan to income ratio
+```{r}
+# Initial model. Predictors selected are based on intuition.
+# Please update this list as needed.
+
+model <- glm(loan_granted~applicant_race_and_ethnicity+applicant_income_000s+hoepa_status+lien_status+owner_occupancy+preapproval+property_type+loan_amount_000s+msamd+applicant_sex+county_code+hud_median_family_income+tract_to_msamd_income+agency_code, family = binomial(link='logit'), data=train)
+```
+
+Summarry for the above model
+```{r}
+summary(model)
+```
+
+ANOVA Test
+```{r}
+anova(model)
+```
+
+
+```{r}
+plot(model)
+```
+## Predictions on this model
+```{r}
+fitted.probs <- predict(model, test, type = "response")
+```
+## Confusion Matrix, Classification error and few other statistics
+
+```{r}
+prediction_stats <- function(fitted.probs, threshold = 0.5) {
+  fitted.results <- ifelse(fitted.probs > 0.5, TRUE, FALSE)
+  
+  classification_error <- mean(fitted.results != test$loan_granted)
+  classification_error
+  
+  print(paste('Accuracy', 1 - classification_error))
+  
+  print(confusionMatrix(as.factor(fitted.results), as.factor(test$loan_granted)))
+}
+
+```
+## Model Performance
+```{r}
+prediction_stats(fitted.probs)
+
+```
+## ROC Curve
+```{r}
+library(ROCR)
+pred <- prediction(fitted.probs, test$loan_granted)
+perf <- performance(pred, measure = "tpr", x.measure = "fpr")
+plot(perf)
+```
+
+
+
+
+
+
+## Model 2: Considering loan to income ratio
+```{r}
+model_loan_income_ratio <- glm(loan_granted~applicant_race_and_ethnicity+applicant_income_000s+loan_to_income_ratio+hoepa_status+lien_status+owner_occupancy+preapproval+property_type+loan_amount_000s+msamd+applicant_sex+county_code+hud_median_family_income+tract_to_msamd_income+agency_code, family = binomial(link='logit'), data=train)
+```
+
+
+```{r}
+summary(model_loan_income_ratio)
+```
+
+
+```{r}
+anova(model_loan_income_ratio)
+```
+## Model Plots
+```{r}
+plot(model_loan_income_ratio)
+```
+## Model Performance
+```{r}
+fitted_2.probs <- predict(model_loan_income_ratio, test, type = "response")
+prediction_stats(fitted_2.probs)
+```
+## ROC Curve
+
+```{r}
+pred <- prediction(fitted_2.probs, test$loan_granted)
+perf <- performance(pred, measure = "tpr", x.measure = "fpr")
+plot(perf)
+```

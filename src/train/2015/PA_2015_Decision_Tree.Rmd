@@ -1,0 +1,180 @@
+---
+title: "PA_2015_Decision_Tree"
+author: "Virat Joshi"
+date: "4/22/2020"
+output: html_document
+---
+---
+title: "PA_2015_decision_tree"
+author: "Virat Joshi"
+date: "4/22/2020"
+output: html_document
+---
+
+# Set the working and data directories
+```{r}
+#working_dir = "/Users/vjstark/Downloads/CSP-571/Project"
+#setwd(working_dir)
+
+#data_dir <- "./Data"
+
+setwd(dirname(dirname(working_directory)))
+
+# The HMDA dataset is loaded from here.
+data_dir <- "D:/data"
+
+```
+
+```{r}
+# The models are saved in this directory.
+model_path <- paste(dirname(rstudioapi::getActiveDocumentContext()$path), "models", sep = "/")
+print(model_path)
+
+# The train and test data are saved in this directory
+model_data_path <- paste(dirname(rstudioapi::getActiveDocumentContext()$path), "data", sep = "/")
+print(model_data_path)
+
+```
+
+
+# Load Essential Libraries
+```{r}
+library(corrplot)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(dplyr)
+library(data.table)
+library(mice)
+library(rstudioapi)    
+library(naniar)
+library(caret)
+library(pROC)
+library(ROCR)
+library(precrec)
+
+#utils_path = './utils/utils.r'
+#model_utils_path = './utils/model_utils.r'
+#source(paste(utils_path))
+#source(paste(model_utils_path))
+
+source(paste(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))), "utils/utils.r", sep="/"))
+
+source(paste(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))), "utils/model_utils.r", sep="/"))
+
+```
+
+# Load the imputed hmda csv file.
+```{r}
+#hmda_data_df_ <- fread(paste(data_dir, "/hmda_2015_pa_imputed.csv", sep=""))
+hmda_data_df <- fread(paste(data_dir, "/HMDA/2015/hmda_2015_pa_imputed.csv", sep = ""))
+
+hmda_data_df <- as.data.frame(hmda_data_df)
+```
+
+# Explore the dataframe obtained above.
+```{r}
+head(hmda_data_df, 20)
+colnames(hmda_data_df)
+```
+
+
+# Create dataframe based on selected column list from the source dataframe.
+```{r}
+hmda_data_df_for_model <- hmda_data_frame_for_model(hmda_data_df)
+hmda_data_df_for_model <- process_model_df_columns(hmda_data_df_for_model)
+
+```
+
+
+# Explore the dataframe with selected columns obtained above.
+
+```{r}
+head(hmda_data_df_for_model, 20)
+
+nrow(hmda_data_df_for_model)
+
+```
+
+
+# Train/test split.
+```{r}
+set.seed(400)
+
+split_dfs <- train_test_split(hmda_data_df_for_model$loan_granted, hmda_data_df_for_model)
+
+train <- split_dfs[[1]]
+test <- split_dfs[[2]]
+```
+
+
+## CART Algorithm
+Classification and Regression Trees (CART) split attributes based on values that minimize a loss function, such as sum of squared errors.
+
+From the selected columns in EDA for feature importances, we select top features and build a model using those predictors. 
+```{r}
+library(rpart)
+#Create Model
+cart_model_basic <- rpart(loan_granted~applicant_race_and_ethnicity + applicant_income_000s + loan_amount_000s + preapproval + co_applicant_present + minority_population + loan_purpose + tract_to_msamd_income + applicant_sex + property_type + owner_occupancy + agency_code + rate_spread + respondent_id ,train, control = rpart.control(cp = 0))
+
+#cart_model_basic <- rpart(loan_granted~agency_code+applicant_race_and_ethnicity+applicant_income_000s+county_code,train,control = rpart.control(cp = 0))
+
+pred.model.1 <- predict(cart_model_basic,test,type = "class")
+cm <- confusionMatrix(pred.model.1,test$loan_granted, positive = "yes")
+draw_confusion_matrix(cm,"Loan Granted","Loan Denied")
+# Prune the model
+pruned  <- prune(cart_model_basic , cp = 0.0084)
+pred <- predict(pruned,test,type = "class" )
+cm <- confusionMatrix(pred,test$loan_granted, positive = "yes")
+draw_confusion_matrix(cm,"Loan Granted","Loan Denied")
+```
+
+### Give the decision tree diagram
+```{r}
+library(rpart.plot)
+rpart.plot(pruned, extra = 106)
+```
+
+
+### Model Performance
+```{r}
+predicted.probabilities.cart <- predict(cart_model_basic,test,type = "prob")
+model_performance_curves(predicted.probabilities.cart[,2],test$loan_granted)
+print_model_performance(predicted.probabilities.cart[, 2], test, positive = "yes", negative = "no", threshold = 0.5)
+```
+
+
+## Now we try a different tree algorithm. The C4.5 algorithm is an extension of the ID3 algorithm and constructs a decision tree to maximize information gain (difference in entropy).
+
+```{r}
+library(RWeka)
+
+c4.5_model <- J48(loan_granted~agency_code+applicant_race_and_ethnicity+county_code+applicant_sex+applicant_income_000s+loan_purpose+owner_occupancy+hud_median_family_income,train)
+
+pred <- predict(c4.5_model,test,type = "class")
+cm <- confusionMatrix(pred,test$loan_granted, positive = "yes")
+draw_confusion_matrix(cm,"Loan Granted","Loan Denied")
+```
+
+### Model Performance
+```{r}
+predicted.probabilities.c4.5 <- predict(c4.5_model,test,type = "prob")
+model_performance_curves(predicted.probabilities.c4.5[,2],test$loan_granted)
+print_model_performance(predicted.probabilities.c4.5[, 2], test, positive = "yes", negative = "no", threshold = 0.5)
+```
+
+### Now lets see the parameters and add some new features like loan_to_income ratio to see if the model performance improves.
+
+```{r}
+#Create Model
+cart_model_new_feature <- rpart(loan_granted~agency_code+applicant_race_and_ethnicity+log_applicant_income_000s+log_loan_amount_000s+county_code+loan_to_income_ratio+hud_median_family_income+applicant_sex,train,control = rpart.control(cp = 0))
+
+pred.model.1 <- predict(cart_model_new_feature,test,type = "class")
+cm <- confusionMatrix(pred.model.1,test$loan_granted, positive = "yes")
+draw_confusion_matrix(cm,"Loan Granted","Loan Denied")
+# Prune the model
+pruned  <- prune(cart_model_new_feature , cp = 0.0084)
+pred <- predict(pruned,test,type = "class" )
+cm <- confusionMatrix(pred,test$loan_granted, positive = "yes")
+draw_confusion_matrix(cm,"Loan Granted","Loan Denied")
+```

@@ -1,0 +1,178 @@
+---
+title: "New_Analysis_2016_IL"
+output: html_document
+---
+```{r}
+#install.packages('summarytools')
+#install.packages("caroline")
+library(summarytools)
+library(tidyverse)
+library(plyr)
+library(rpart)
+library(rpart.plot)
+library(caTools)
+library(caret)
+library(DT)
+library(dplyr)
+library(caroline)
+library(Hmisc)
+rm(list=ls())
+
+homeMortgage = read_csv("C:/Users/bhuvn/Downloads/HDMA_2016_IL.csv")
+dim(homeMortgage)
+
+d<-describe(homeMortgage)
+d
+r<-dfSummary(homeMortgage)
+r
+```
+
+
+Variables with all observations missing:
+[1] applicant_race_name_3    applicant_race_name_4    applicant_race_name_5    applicant_race_5        
+[5] co_applicant_race_name_2 co_applicant_race_name_3 co_applicant_race_name_4 co_applicant_race_4     
+[9] co_applicant_race_name_5 co_applicant_race_5 
+```{r}
+drops <- c("applicant_race_name_3","applicant_race_name_4","applicant_race_name_5","applicant_race_5",
+           "co_applicant_race_name_2","co_applicant_race_name_3","co_applicant_race_name_4","co_applicant_race_4",
+           "co_applicant_race_name_5","co_applicant_race_5")
+homeMortgage <- homeMortgage[ , !(names(homeMortgage) %in% drops)]
+dim(homeMortgage)
+```
+
+Variables with above 98% observations missing:
+```{r}
+drops <- c("rate_spread","denial_reason_3","denial_reason_name_3","denial_reason_2","denial_reason_name_2",
+           "co_applicant_race_3","co_applicant_race_2","applicant_race_4","applicant_race_3",
+           "applicant_race_2","applicant_race_name_2")
+homeMortgage <- homeMortgage[ , !(names(homeMortgage) %in% drops)]
+dim(homeMortgage)
+```
+
+Variables with No unique values (Not important factors)
+```{r}
+drops <- c("as_of_year","state_name","state_abbr","state_code")
+homeMortgage <- homeMortgage[ , !(names(homeMortgage) %in% drops)]
+dim(homeMortgage)
+```
+
+Removing the column name containing the codes for the columns with string values.
+Not required as they are a repetion of the corresponding column
+```{r}
+drops <- c("agency_code","loan_type","property_type","loan_purpose","owner_occupancy","preapproval","action_taken",
+           "msamd","county_code","applicant_ethnicity","co_applicant_ethnicity","applicant_race_1","co_applicant_race_1",
+           "applicant_sex","co_applicant_sex","purchaser_type","denial_reason_1","hoepa_status","lien_status","edit_status")
+homeMortgage <- homeMortgage[ , !(names(homeMortgage) %in% drops)]
+dim(homeMortgage)
+```
+
+Respondent Information features like Respondant ID, Agency, and Edit Status are not relevant to our business problem.
+
+```{r}
+drops <- c("respondent_id","agency_name","edit_status_name")
+homeMortgage <- homeMortgage[ , !(names(homeMortgage) %in% drops)]
+dim(homeMortgage)
+```
+
+
+print(describe(homeMortgage)) #Out of 30 predictors, we are geting missing values in 11 predictors
+Counting Number of NA in each row
+
+```{r}
+homeMortgage$na_count <- apply(homeMortgage, 1, function(x) sum(is.na(x)))
+print(count(homeMortgage, "na_count"))
+```
+
+Removing the rows with NA counts per row more than 9
+
+
+```{r}
+homeMortgage<-homeMortgage[!(homeMortgage$na_count==11 | homeMortgage$na_count==10 | homeMortgage$na_count==9),]
+dim(homeMortgage)
+```
+
+Denial reason name is having too many missing value and it is not relevant
+```{r}
+drops <- c("denial_reason_name_1")
+homeMortgage <- homeMortgage[ , !(names(homeMortgage) %in% drops)]
+dim(homeMortgage)
+```
+
+Appling NA count method again
+```{r}
+homeMortgage$na_count <- apply(homeMortgage, 1, function(x) sum(is.na(x)))
+print(count(homeMortgage, "na_count"))
+```
+
+```{r}
+lookup_df <- as.data.frame(summarise_at(group_by(homeMortgage,county_name),
+                                     vars(hud_median_family_income),
+                                     funs(mean(.,na.rm=TRUE))))
+lookup_df
+dim(lookup_df)
+dim(homeMortgage)
+```
+
+```{r}
+homeMortgage$applicant_income_000s[homeMortgage$applicant_income_000s==""] <- "NA"
+dim(homeMortgage)
+a<-count(is.na(homeMortgage$applicant_income_000s))
+a
+```
+
+Replacing the missing Income values with Median family income in county
+```{r}
+homeMortgage$applicant_income_000s = ifelse(is.na(homeMortgage$applicant_income_000s),
+                                            paste((homeMortgage$hud_median_family_income/1000)),
+                                            paste(homeMortgage$applicant_income_000s));homeMortgage
+
+count(is.na(homeMortgage$applicant_income_000s))
+```
+
+Appling NA count method again
+```{r}
+homeMortgage$na_count <- apply(homeMortgage, 1, function(x) sum(is.na(x)))
+print(count(homeMortgage, "na_count"))
+
+dfSummary(homeMortgage)
+```
+
+
+Removing rows with empty census tract number.
+```{r}
+new_DF <- homeMortgage[is.na(homeMortgage$census_tract_number),]
+table(new_DF$applicant_race_name_1)
+dim(homeMortgage)
+homeMortgage<-homeMortgage[!(is.na(homeMortgage$census_tract_number)),]
+dim(homeMortgage)
+```
+
+Appling NA count method again
+```{r}
+homeMortgage$na_count <- apply(homeMortgage, 1, function(x) sum(is.na(x)))
+print(count(homeMortgage, "na_count"))
+dfSummary(homeMortgage)
+```
+
+```{r}
+new1_DF <- homeMortgage[is.na(homeMortgage$tract_to_msamd_income),]
+new2_DF <- homeMortgage[is.na(homeMortgage$population),]
+new1_DF %>% select(tract_to_msamd_income, hud_median_family_income,county_name,applicant_income_000s)
+new2_DF %>% select(county_name,population,minority_population,census_tract_number,msamd_name)
+
+homeMortgage$tract_to_msamd_income = ifelse(is.na(homeMortgage$tract_to_msamd_income),
+                                            paste(((as.numeric(homeMortgage$applicant_income_000s)*1000)/homeMortgage$hud_median_family_income)*100),
+                                            paste(homeMortgage$tract_to_msamd_income));homeMortgage
+
+count(is.na(homeMortgage$tract_to_msamd_income))
+
+dfSummary(homeMortgage)
+
+new3_DF <- homeMortgage[is.na(homeMortgage$number_of_owner_occupied_units),]
+new3_DF %>% select(number_of_owner_occupied_units, census_tract_number,msamd_name)
+```
+
+
+
+
+

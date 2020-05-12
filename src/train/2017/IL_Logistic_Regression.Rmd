@@ -1,0 +1,163 @@
+---
+title: "IL 2017 Logistic Regression"
+author: "Omkar Pawar"
+output: html_notebook
+---
+
+## We tried the following glm models. The predictors chosen were picked
+## from our EDA analysis and feature engineering work and some background
+## knowledge.
+# Model 1. Raw loan and applicant income.
+# Model 2. Log of loan and applicant income.
+# Model 3. Log of loan amount and loan to income ratio.
+# Model 4. Cross validation model with same predictors as Model 3.
+
+## Results.
+# Model 2, Model 3 and Model 4 performed similarly. The criterion was AUC 
+# curve, Mcfadden R square value and confusion matrix results on test data.
+
+# Model 3 was chosen as banks do use the loan to income ratio as one of their
+# criterion. 
+
+## Key observation
+# The AUC curve for our models ranges between 74 to 77%. The AUC curve can
+# be thought of as a classification-threshold-invariant. It measures the #
+# quality of the model's predictions irrespective of the threshold value
+# https://developers.google.com/machine-learning/crash-course/classification/roc-and-auc.
+# We feel that this is because our models miss crucial data like debt to income
+# ratio, credit scores, etc which banks use as additional predictors.
+
+
+```{r}
+library(sys)
+
+working_directory <- getwd()
+
+setwd(dirname(dirname(working_directory)))
+
+# The models are saved in this directory.
+model_path <- paste(dirname(rstudioapi::getActiveDocumentContext()$path), "models", sep = "/")
+print(model_path)
+
+library(corrplot)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(dplyr)
+library(data.table)
+library(mice)
+library(rstudioapi)    
+library(naniar)
+library(caret)
+library(pROC)
+library(ROCR)
+library(lmtest)
+
+source(paste(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))), "utils/utils.r", sep="/"))
+
+source(paste(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))), "utils/model_utils.r", sep="/"))
+```
+
+```{r}
+hmda_data_df_ <- fread("/Users/omkarpawar/Desktop/imputed_il_2017.csv")
+hmda_data_df <- as.data.frame(hmda_data_df_)
+```
+
+
+# Create dataframe based on selected column list from the source dataframe.
+```{r}
+
+df_for_model <- hmda_data_frame_for_model(hmda_data_df)
+df_for_model <- process_model_df_columns(df_for_model)
+
+```
+
+```{r}
+head(df_for_model, 20)
+
+nrow(df_for_model)
+```
+```{r}
+set.seed(400)
+
+split_dfs <- train_test_split(df_for_model$loan_granted, df_for_model)
+
+train <- split_dfs[[1]]
+test <- split_dfs[[2]]
+```
+
+# Null model
+```{r}
+null_model <- build_and_evaluate_hmda_null_model("loan_granted~1", train, test)
+
+```
+
+# Model with applicant income and loan amount.
+
+```{r}
+model_2017_income_loan_amount <-
+build_glm_model("loan_granted~applicant_race_and_ethnicity+applicant_income_000s+loan_amount_000s+preapproval+co_applicant_present+county_code+minority_population+loan_purpose+tract_to_msamd_income+applicant_sex+co_applicant_sex+property_type+owner_occupancy+agency_code+respondent_id+rate_spread", train)
+
+model_summary_and_plot(model_2017_income_loan_amount, train)
+mcfadden_r_square(model_2017_income_loan_amount, null_model)
+
+```
+# Model with logs of applicant income and loan amount.
+```{r}
+model_2017_log_income_loan_amount <- build_glm_model("loan_granted~applicant_race_and_ethnicity+log_applicant_income_000s+log_loan_amount_000s+preapproval+co_applicant_present+county_code+tract_to_msamd_income+loan_purpose+owner_occupancy+respondent_id+minority_population+rate_spread+agency_code+applicant_sex+co_applicant_sex+property_type", train)
+
+model_summary_and_plot(model_2017_log_income_loan_amount, train)
+mcfadden_r_square(model_2017_log_income_loan_amount, null_model)
+
+```
+# Model with logs of applicant income and loan amount and loan to income ratio
+
+```{r}
+model_2017_ratio_of_loan_to_income_with_log_of_income_and_amount <- build_glm_model("loan_granted~applicant_race_and_ethnicity+owner_occupancy+preapproval+log_loan_amount_000s+applicant_sex+county_code+tract_to_msamd_income+co_applicant_present+agency_code+minority_population+loan_to_income_ratio+co_applicant_sex+loan_purpose+rate_spread+property_type+log_applicant_income_000s", train)
+
+model_summary_and_plot(model_2017_ratio_of_loan_to_income_with_log_of_income_and_amount, train)
+mcfadden_r_square(model_2017_ratio_of_loan_to_income_with_log_of_income_and_amount, null_model)
+
+```
+# Cross validation
+```{r}
+model_2017_cross_val_loan_income_ratio <- cross_validation("loan_granted~applicant_race_and_ethnicity+loan_to_income_ratio+co_applicant_present+owner_occupancy+preapproval+property_type+respondent_id+log_loan_amount_000s+county_code+loan_purpose+tract_to_msamd_income+minority_population+respondent_id+agency_code+rate_spread+log_applicant_income_000s", train)
+
+model_summary_and_plot(model_2017_cross_val_loan_income_ratio$finalModel, train)
+
+```
+
+# Model performance.
+
+```{r}
+library(ROCR)
+library(pROC)
+model1_fitted.probs <- predict(model_2017_income_loan_amount, test, type = "response")
+model2_fitted.probs <- predict(model_2017_log_income_loan_amount, test, type = "response")
+model3_fitted.probs <- predict(model_2017_ratio_of_loan_to_income_with_log_of_income_and_amount, test, type = "response")
+
+writeLines("")
+writeLines("Model 1 performance")
+print_model_performance(model1_fitted.probs, test, positive = "yes", negative = "no", threshold = 0.74)
+
+writeLines("")
+writeLines("Model 2 performance")
+print_model_performance(model2_fitted.probs, test, positive = "yes", negative = "no", threshold = 0.74)
+
+writeLines("")
+writeLines("Model 3 performance")
+print_model_performance(model3_fitted.probs, test, positive = "yes", negative = "no", threshold = 0.75)
+
+```
+# Cross validation performance
+```{r}
+library(pROC)
+
+model4_fitted.probs <- predict(model_2017_cross_val_loan_income_ratio, test, type = "prob")
+writeLines("")
+writeLines("Cross validation model performance")
+
+writeLines("")
+writeLines("Model 3 performance")
+print_model_performance(model4_fitted.probs[, 2], test, positive = "yes", negative = "no", threshold = 0.6)
+```

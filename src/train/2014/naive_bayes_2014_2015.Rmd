@@ -1,0 +1,249 @@
+---
+title: "Naive Bayes for Loansharks (2014-2015 Pennsylvania)"
+author: "Omkar Pawar [Please add your names here]" 
+date: "4/8/2020"
+output: html_notebook
+---
+
+## Global setup like working directory, data directory etc should happen here.
+
+```{r}
+library(sys)
+
+working_directory <- getwd()
+
+setwd(dirname(dirname(working_directory)))
+
+writeLines("")
+getwd()
+# The HMDA dataset is loaded from here.
+data_dir <- "D:/data"
+census_data_dir = "d:/data/census"
+
+# The models are saved in this directory.
+model_path <- paste(dirname(rstudioapi::getActiveDocumentContext()$path), "models", sep = "/")
+print(model_path)
+
+# The train and test data are saved in this directory
+model_data_path <- paste(dirname(rstudioapi::getActiveDocumentContext()$path), "data", sep = "/")
+print(model_data_path)
+
+```
+
+## Install required packages.
+```{r}
+library(corrplot)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(dplyr)
+library(data.table)
+library(mice)
+library(rstudioapi)    
+library(naniar)
+library(caret)
+library(pROC)
+library(ROCR)
+
+source(paste(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))), "utils/utils.r", sep="/"))
+
+source(paste(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))), "utils/model_utils.r", sep="/"))
+
+```
+
+# Load the imputed hmda csv file.
+```{r}
+#hmda_data_df_ <- fread("/Users/omkarpawar/Desktop/Data/PA/hmda_2014_pa_imputed.csv")
+
+hmda_data_df_ <- fread("/Users/omkarpawar/Desktop/Data/PA/hmda_2014_pa_imputed.csv")
+hmda_data_df_ <- as.data.frame(hmda_data_df_)
+
+
+#hmda_2015 <- fread("/Users/omkarpawar/Desktop/Data/PA/hmda_2015_pa_imputed.csv")
+hmda_2015 <- fread("/Users/omkarpawar/Desktop/Data/PA/hmda_2014_pa_imputed.csv")
+
+hmda_2014 <- as.data.frame(hmda_data_df_)
+hmda_2014 <- hmda_2014[, !(colnames(hmda_2014) %in% c("Decision"))]
+df2015 <- as.data.frame(hmda_2015)
+
+hmda_data_df <- rbind(hmda_2014, df2015)
+
+```
+
+
+# Explore the dataframe obtained above.
+```{r}
+head(hmda_data_df, 20)
+# Ignore action values of 4 : Application withdrawn by applicant
+# 6: Loan purchased by the institution and 2: Application approved but
+# not accepted. 
+# The remaining action types are 1: Loan originated, 3. Application denied
+# by financial institution, 5. File closed for incompleteness and 7. Preapproval
+# request denied by financial institution.
+hmda_data_df <- hmda_data_df[hmda_data_df$action_taken != 2 & hmda_data_df$action_taken != 4 & hmda_data_df$action_taken != 6, ]
+
+```
+
+# Create dataframe based on selected column list from the source dataframe.
+```{r}
+hmda_data_df_for_model <- hmda_data_frame_for_model(hmda_data_df)
+hmda_data_df_for_model <- process_model_df_columns(hmda_data_df_for_model)
+```
+
+# Explore the dataframe with selected columns obtained above.
+
+```{r}
+head(hmda_data_df_for_model, 20)
+
+nrow(hmda_data_df_for_model)
+
+length(levels(hmda_data_df_for_model$respondent_id))
+length(levels(hmda_data_df_for_model$county_code))
+
+dim(hmda_data_df_for_model)
+```
+
+# Train/test split.
+```{r}
+set.seed(400)
+
+split_dfs <- train_test_split(hmda_data_df_for_model$loan_granted, hmda_data_df_for_model)
+
+train <- split_dfs[[1]]
+test <- split_dfs[[2]]
+dim(train)
+```
+
+# Naive Bayes Model with all Predictors
+```{r}
+library(e1071)
+
+all_predictors_model <- naiveBayes(loan_granted~., train)
+preds <- predict(all_predictors_model,test)
+confusionMatrix(preds,test$loan_granted, positive = "yes")
+```
+
+```{r}
+cm <- confusionMatrix(preds,test$loan_granted, positive = "yes")
+cm
+draw_confusion_matrix(cm, "Loan Granted", "Loan Denied")
+```
+
+# Function to build a Naive Bayes Model.
+```{r}
+build_nb <- function(formula, df, test){
+  model <- naiveBayes(formula, df)
+  preds <- predict(model,test)
+  cm<-confusionMatrix(preds,test$loan_granted,positive = "yes")
+  draw_confusion_matrix(cm,"Loan Granted","Loan Denied")
+  precision_recall(cm$table)
+  return(model)
+}
+```
+
+# Model with applicant income and loan amount.
+```{r}
+nb_2015_income_loan_amount <-
+build_nb(as.formula("loan_granted~applicant_race_and_ethnicity+applicant_income_000s+loan_amount_000s+preapproval+co_applicant_present+county_code+minority_population+loan_purpose+tract_to_msamd_income+applicant_sex+property_type+owner_occupancy+agency_code+rate_spread+respondent_id"), train , test)
+
+
+```
+
+
+# Model with logs of applicant income and loan amount.
+```{r}
+nb_2015_log_income_loan_amount <-
+build_nb(as.formula("loan_granted~applicant_race_and_ethnicity+log_applicant_income_000s+log_loan_amount_000s+preapproval+co_applicant_present+county_code+tract_to_msamd_income+loan_purpose+owner_occupancy+respondent_id+minority_population+rate_spread+agency_code+applicant_sex+property_type"), train , test)
+```
+
+# Model with logs of applicant income and loan amount and loan to income ratio
+
+```{r}
+nb_2015_ratio_of_loan_to_income_with_log_of_income_and_amount <-
+build_nb(as.formula("loan_granted~applicant_race_and_ethnicity+owner_occupancy+preapproval+log_loan_amount_000s+applicant_sex+county_code+tract_to_msamd_income+co_applicant_present+agency_code+minority_population+loan_purpose+rate_spread+property_type+loan_to_income_ratio+respondent_id"), train , test)
+```
+
+
+# Model with census data integrated.
+```{r}
+# https://www2.census.gov/programs-surveys/popest/datasets/2010-2018/counties/asrh/
+census_pa_file_path <- "/Users/omkarpawar/Desktop/Data/Census/cc-est2018-alldata-42.csv"
+
+merged_hmda_data_df_for_model <- merge_hmda_df_with_census(census_pa_file_path, hmda_data_df_for_model)
+
+split_dfs <- train_test_split(merged_hmda_data_df_for_model$loan_granted, merged_hmda_data_df_for_model)
+
+merged_train <- split_dfs[[1]]
+merged_test <- split_dfs[[2]]
+
+merged_2015_model <-
+build_nb(as.formula("loan_granted~applicant_race_and_ethnicity+owner_occupancy+preapproval+property_type+log_loan_amount_000s+tract_to_msamd_income+co_applicant_present+agency_code+BLACK_PERCENT+ASIAN_PERCENT+HISPANIC_PERCENT+county_code+respondent_id+applicant_sex+loan_purpose+loan_to_income_ratio"), merged_train , merged_test)
+
+model5_fitted.probs <- predict(merged_2015_model, merged_test, "raw")
+```
+
+# Loan to value ratio is an important metric which banks use to decide
+# whether a loan should be granted or not. For e.g. the higher the loan
+# to value ratio the riskier it is for the bank.
+# https://en.wikipedia.org/wiki/Loan-to-value_ratio
+# Banks are not required  to report this metric in the HMDA reporting
+# law. We use the median of the home values in that county based on
+# data available from zillow https://www.zillow.com/research/data/
+```{r}
+period_list <- c("2015-01", "2015-02", "2015-03", "2015-04",
+                 "2015-05", "2015-06", "2015-07", "2015-08",
+                 "2015-09", "2015-10", "2015-11", "2015-12")
+
+merged_hmda_with_loan_to_value_ratio <- augment_hmda_data_with_estimated_loan_to_value_ratio_from_zillow("/Users/omkarpawar/Desktop/Data/Secondary/County_Zhvi_AllHomes.csv", hmda_data_df_for_model, "PA", period_list)
+
+
+head(merged_hmda_with_loan_to_value_ratio)
+
+```
+
+# Train test split on the hmda dataset merged with estimated loan to value
+# ratio
+```{r}
+split_dfs <- train_test_split(merged_hmda_with_loan_to_value_ratio$loan_granted, merged_hmda_with_loan_to_value_ratio)
+new_train <- split_dfs[[1]]
+new_test <- split_dfs[[2]]
+```
+
+## Model with estimated loan to value ratio.
+```{r}
+nb_2015_with_loan_to_value_ratio <-
+build_nb(as.formula("loan_granted~applicant_race_and_ethnicity+owner_occupancy+preapproval+log_loan_amount_000s+applicant_sex+county_code+tract_to_msamd_income+co_applicant_present+agency_code+minority_population+loan_to_income_ratio+loan_purpose+rate_spread+property_type+loan_to_value_ratio+respondent_id"), new_train,new_test)
+
+model6_fitted.probs <- predict(nb_2015_with_loan_to_value_ratio, new_test, "raw")
+#print_model_performance(model6_fitted.probs, new_test, positive = "yes", negative = "no", threshold = 0.6)
+
+```
+
+# Save the models
+```{r}
+dir.create(model_path, showWarnings = FALSE)
+save(nb_2015_income_loan_amount, file = paste(model_path, "/nb_income_loan_amount.rdata", sep=""))
+save(nb_2015_log_income_loan_amount, file = paste(model_path, "/nb_log_income_loan_amount.rdata", sep=""))
+save(nb_2015_ratio_of_loan_to_income_with_log_of_income_and_amount, file = paste(model_path, "/nb_loan_income_ratio_with_log_of_income_and_amount.rdata", sep=""))
+save(merged_hmda_with_loan_to_value_ratio, file = paste(model_path, "/merged_model.rdata", sep=""))
+
+save(nb_2015_with_loan_to_value_ratio, file = paste(model_path, "/nb_merged_model_with_loan_to_value.rdata", sep=""))
+```
+
+# Save the train and test data for future reference.
+
+```{r}
+dir.create(model_data_path, showWarnings = FALSE)
+save(train, file = paste(model_data_path, "/train.rdata", sep = ""))
+save(test, file = paste(model_data_path, "/test.rdata", sep = ""))
+
+dir.create(model_data_path, showWarnings = FALSE)
+save(merged_train, file = paste(model_data_path, "/merged_train.rdata", sep = ""))
+save(merged_test, file = paste(model_data_path, "/merged_test.rdata", sep = ""))
+
+dir.create(model_data_path, showWarnings = FALSE)
+save(new_train, file = paste(model_data_path, "/train_with_loan_to_value.rdata", sep = ""))
+save(new_test, file = paste(model_data_path, "/test_with_loan_to_value.rdata", sep = ""))
+
+
+```

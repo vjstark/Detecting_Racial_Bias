@@ -1,0 +1,150 @@
+---
+title: "Counties data For Home value Per year."
+author: "Omkar Pawar"
+output: html_notebook
+---
+
+
+```{r}
+library(corrplot)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(dplyr)
+library(data.table)
+library(mice)
+library(rstudioapi)
+library(naniar)
+```
+
+
+```{r}
+all_homes <- fread("/Users/omkarpawar/Desktop/County_Zhvi_AllHomes.csv")
+df <- data.frame(all_homes)
+head(df)
+```
+In this dataframe, we are having data for the home value of counties per year per month. In the primary dataset, we are dealing with data per year.
+So what we can do here is transform the available data of per month into per year. To do that, we take median for each year of 12 months of the respective year and store them in new column. 
+
+```{r}
+colnames(il)
+```
+Also, we don't need all the data columns, we can drop the columns having data prior to year 2004.
+
+```{r}
+#Drop columns whose data is not needed
+df<-df[-c(8:100)]
+colnames(df)
+```
+
+
+```{r}
+
+# Find median values for each year. Store them in a new column names median_year. Now we have median home value for home per county per year.
+
+# 2004
+df<-df %>% 
+  rowwise() %>% 
+  mutate(Median_2004 = median(c(X2004.01, X2004.02, X2004.03, X2004.04, X2004.05, X2004.06, X2004.07, X2004.08, X2004.09, X2004.10, X2004.11, X2004.12), na.rm = TRUE))
+
+# 2005
+df<-df %>% 
+  rowwise() %>% 
+  mutate(Median_2005 = median(c(X2005.01, X2005.02, X2005.03, X2005.04, X2005.05, X2005.06, X2005.07, X2005.08, X2005.09, X2005.10, X2005.11, X2005.12), na.rm = TRUE))
+
+# 2006
+df<-df %>% 
+  rowwise() %>% 
+  mutate(Median_2006 = median(c(X2006.01, X2006.02, X2006.03, X2006.04, X2006.05, X2006.06, X2006.07, X2006.08, X2006.09, X2006.10, X2006.11, X2006.12), na.rm = TRUE))
+
+# 2007
+df<-df %>% 
+  rowwise() %>% 
+  mutate(Median_2007 = median(c(X2007.01, X2007.02, X2007.03, X2007.04, X2007.05, X2007.06, X2007.07, X2007.08, X2007.09, X2007.10, X2007.11, X2007.12), na.rm = TRUE))
+
+# 2008
+df<-df %>% 
+  rowwise() %>% 
+  mutate(Median_2008 = median(c(X2008.01, X2008.02, X2008.03, X2008.04, X2008.05, X2008.06, X2008.07, X2008.08, X2008.09, X2008.10, X2008.11, X2008.12), na.rm = TRUE))
+
+# 2009
+
+df<-df %>% 
+  rowwise() %>% 
+  mutate(Median_2009 = median(c(X2009.01, X2009.02, X2009.03, X2009.04, X2009.05, X2009.06, X2009.07, X2009.08, X2009.09, X2009.10, X2009.11, X2009.12), na.rm = TRUE))
+# 2010
+df<-df %>% 
+  rowwise() %>% 
+  mutate(Median_2010 = median(c(X2010.01, X2010.02, X2010.03, X2010.04, X2010.05, X2010.06, X2010.07, X2010.08, X2010.09, X2010.10, X2010.11, X2010.12), na.rm = TRUE))
+
+# 2011
+df<-df %>% 
+  rowwise() %>% 
+  mutate(Median_2011 = median(c(X2011.01, X2011.02, X2011.03, X2011.04, X2011.05, X2011.06, X2011.07, X2011.08, X2011.09, X2011.10, X2011.11, X2011.12), na.rm = TRUE))
+
+# 2012
+df<-df %>% 
+  rowwise() %>% 
+  mutate(Median_2012 = median(c(X2012.01, X2012.02, X2012.03, X2012.04, X2012.05, X2012.06, X2012.07, X2012.08, X2012.09, X2012.10, X2012.11, X2012.12), na.rm = TRUE))
+
+# 2013
+df<-df %>% 
+  rowwise() %>% 
+  mutate(Median_2013 = median(c(X2013.01, X2013.02, X2013.03, X2013.04, X2013.05, X2013.06, X2013.07, X2013.08, X2013.09, X2013.10, X2013.11, X2013.12), na.rm = TRUE))
+
+# 2014
+df<-df %>% 
+  rowwise() %>% 
+  mutate(Median_2014 = median(c(X2014.01, X2014.02, X2014.03, X2014.04, X2014.05, X2014.06, X2014.07, X2014.08, X2014.09, X2014.10, X2014.11, X2014.12), na.rm = TRUE))
+
+# 2015
+df<-df %>% 
+  rowwise() %>% 
+  mutate(Median_2015 = median(c(X2015.01, X2015.02, X2015.03, X2015.04, X2015.05, X2015.06, X2015.07, X2015.08, X2015.09, X2015.10, X2015.11, X2015.12), na.rm = TRUE))
+
+# 2016
+df<-df %>% 
+  rowwise() %>% 
+  mutate(Median_2016 = median(c(X2016.01, X2016.02, X2016.03, X2016.04, X2016.05, X2016.06, X2016.07, X2016.08, X2016.09, X2016.10, X2016.11, X2016.12), na.rm = TRUE))
+
+# 2017
+df<-df %>% 
+  rowwise() %>% 
+  mutate(Median_2017 = median(c(X2017.01, X2017.02, X2017.03, X2017.04, X2017.05, X2017.06, X2017.07, X2017.08, X2017.09, X2017.10, X2017.11, X2017.12), na.rm = TRUE))
+
+# 2018
+df<-df %>% 
+  rowwise() %>% 
+  mutate(Median_2018 = median(c(X2018.01, X2018.02, X2018.03, X2018.04, X2018.05, X2018.06, X2018.07, X2018.08, X2018.09, X2018.10, X2018.11, X2018.12), na.rm = TRUE))
+
+# 2019
+df<-df %>% 
+  rowwise() %>% 
+  mutate(Median_2019 = median(c(X2019.01, X2019.02, X2019.03, X2019.04, X2019.05, X2019.06, X2019.07, X2019.08, X2019.09, X2019.10, X2019.11, X2019.12), na.rm = TRUE))
+
+colnames(df)
+
+
+i = as.character(11)
+paste("X20",i,".01, X20",i,".02, X20",i,".03, X20",i,".04, X20",i,".05, X20",i,".06, X20",i,".07, X20",i,".08, X20",i,".09, X20",i,".10, X20",i,".11, X20",i,".12",sep = "")
+```
+Now in the data, we have a created column for median house value per year. Lets drop the columns which are not needed and store the data file.
+
+```{r}
+required_df<-df[-c(8:201)]
+head(required_df)
+```
+As we can see there are lot of missing values in the dataset. We can clean them as needed. We are working on specific states only. 
+### While using this dataset, filter the data according to states and then use it for analysis. As there maybe some counties where the data is missing, try to impute it before use as needed.
+
+Also, some counties are misspelled or having extra spaces. So give it a look before merging with primary data.
+```{r}
+sapply(required_df,function (x) sum(is.na(x)))
+```
+##Write data to csv
+Change the path as needed. Also, I have uploaded the data to link below. You can download it from there as well.
+```{r}
+write.csv(required_df,"/Users/omkarpawar/Desktop/counties_home_value_per_year.csv")
+```
+Link to the dataframe : 
+https://drive.google.com/open?id=1h6vN7NRVYBBPn2bz8PTYpfxLwVUgNPtM

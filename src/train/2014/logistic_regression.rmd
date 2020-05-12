@@ -1,0 +1,326 @@
+---
+title: "Logistic Regression for Loansharks (2014 Pennsylvania)"
+author: "Anantanarayanan G Iyengar [Please add your names here]" 
+date: "4/5/2020"
+output: html_notebook
+---
+
+## We tried the following glm models. The predictors chosen were picked
+## from our EDA analysis and feature engineering work and some background
+## knowledge.
+# Model 1. Raw loan and applicant income.
+# Model 2. Log of loan and applicant income.
+# Model 3. Log of loan amount and loan to income ratio.
+# Model 4. Cross validation model with same predictors as Model 3.
+# Model 5. Merged model with hmda data and census demographic and ethnicity
+#          data. We removed the minority_population column from the HMDA data
+#          and replaced it with predictors like BLACK_PERCENT, ASIAN_PERCENT, #            etc. We were trying to see if African Americans were negatively 
+#          impacted if they applied for loans in areas where the BLACK_PERCENT
+#          was high, etc.
+# Model 6. Merged model with median loan to value ratio coming from Zillow.
+#          Banks use the loan to value ratio as one of the criterion in loan
+#          decisions. As HMDA data does not have this information, we thought
+#          we could approximate this by using the median home values in the
+#          county. 
+
+## Results.
+# Model 2, Model 3 and Model 4 performed similarly. The criterion was AUC 
+# curve, Mcfadden R square value and confusion matrix results on test data.
+# Model 5 and Model 6 also performed well. However the results weren't that 
+# different from the simpler models. Hence we opted for the simpler models.
+
+# Model 3 was chosen as banks do use the loan to income ratio as one of their
+# criterion. 
+
+## Key observation
+# The AUC curve for our models ranges between 75 to 77%. The AUC curve can
+# be thought of as a classification-threshold-invariant. It measures the #
+# quality of the model's predictions irrespective of the threshold value
+# https://developers.google.com/machine-learning/crash-course/classification/roc-and-auc.
+# We feel that this is because our models miss crucial data like debt to income
+# ratio, credit scores, etc which banks use as additional predictors.
+
+
+## Global setup like working directory, data directory etc should happen here.
+
+```{r}
+library(sys)
+
+working_directory <- getwd()
+
+setwd(dirname(dirname(working_directory)))
+
+writeLines("")
+getwd()
+# The HMDA dataset is loaded from here.
+data_dir <- "D:/data"
+census_data_dir = "d:/data/census"
+
+# The models are saved in this directory.
+model_path <- paste(dirname(rstudioapi::getActiveDocumentContext()$path), "models", sep = "/")
+print(model_path)
+
+# The train and test data are saved in this directory
+model_data_path <- paste(dirname(rstudioapi::getActiveDocumentContext()$path), "data", sep = "/")
+print(model_data_path)
+
+options(scipen = 999)
+
+```
+
+## Install required packages.
+```{r}
+# https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
+list_of_packages <- c("mlbench", "corrplot", "rvest", "tidyr", "stringr", "dplyr", "lubridate", "data.table", "mice", "scales", "naniar", "rpart", "rpart.plot", "caret", "pROC", "ROCR")
+new.packages <- list_of_packages[!(list_of_packages %in% installed.packages()[,"Package"])]
+
+if (length(new.packages)) {
+  print("Installing packages\n")
+  install.packages(new.packages())
+}
+
+library(corrplot)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(dplyr)
+library(data.table)
+library(mice)
+library(rstudioapi)    
+library(naniar)
+library(caret)
+library(pROC)
+library(ROCR)
+
+source(paste(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))), "utils/utils.r", sep="/"))
+
+source(paste(dirname(dirname(dirname(rstudioapi::getActiveDocumentContext()$path))), "utils/model_utils.r", sep="/"))
+
+```
+
+# Load the imputed hmda csv file.
+```{r}
+hmda_data_df_ <- fread(paste(data_dir, "/HMDA/2014/hmda_2014_pa_imputed.csv", sep=""))
+hmda_data_df <- as.data.frame(hmda_data_df_)
+```
+
+# Explore the dataframe obtained above.
+```{r}
+head(hmda_data_df, 20)
+
+```
+
+# Create dataframe based on selected column list from the source dataframe.
+```{r}
+hmda_data_df_for_model <- hmda_data_frame_for_model(hmda_data_df)
+hmda_data_df_for_model <- process_model_df_columns(hmda_data_df_for_model)
+
+```
+
+# Explore the dataframe with selected columns obtained above.
+
+```{r}
+head(hmda_data_df_for_model, 20)
+
+nrow(hmda_data_df_for_model)
+
+length(levels(hmda_data_df_for_model$respondent_id))
+length(levels(hmda_data_df_for_model$county_code))
+
+
+```
+
+# Train/test split.
+```{r}
+set.seed(400)
+
+split_dfs <- train_test_split(hmda_data_df_for_model$loan_granted, hmda_data_df_for_model)
+
+train <- split_dfs[[1]]
+test <- split_dfs[[2]]
+
+```
+
+
+# Null model
+```{r}
+null_model <- build_and_evaluate_hmda_null_model("loan_granted~1", train, test)
+```
+
+# Model with applicant income and loan amount.
+```{r}
+model_2014_income_loan_amount <-
+build_glm_model("loan_granted~applicant_race_and_ethnicity+applicant_income_000s+loan_amount_000s+preapproval+co_applicant_present+county_code+minority_population+loan_purpose+tract_to_msamd_income+applicant_sex+property_type+owner_occupancy+agency_code+rate_spread+respondent_id", train)
+
+model_summary_and_plot(model_2014_income_loan_amount, train)
+mcfadden_r_square(model_2014_income_loan_amount, null_model)
+
+```
+
+
+# Model with logs of applicant income and loan amount.
+```{r}
+model_2014_log_income_loan_amount <- build_glm_model("loan_granted~applicant_race_and_ethnicity+log_applicant_income_000s+log_loan_amount_000s+preapproval+co_applicant_present+county_code+tract_to_msamd_income+loan_purpose+owner_occupancy+respondent_id+minority_population+rate_spread+agency_code+applicant_sex+property_type", train)
+
+model_summary_and_plot(model_2014_log_income_loan_amount, train)
+mcfadden_r_square(model_2014_log_income_loan_amount, null_model)
+
+```
+
+# Model with logs of applicant income and loan amount and loan to income ratio
+
+```{r}
+model_2014_ratio_of_loan_to_income_with_log_of_income_and_amount <- build_glm_model("loan_granted~applicant_race_and_ethnicity+owner_occupancy+preapproval+log_loan_amount_000s+applicant_sex+county_code+tract_to_msamd_income+co_applicant_present+agency_code+minority_population+loan_purpose+rate_spread+property_type++loan_to_income_ratio+respondent_id", train)
+
+model_summary_and_plot(model_2014_ratio_of_loan_to_income_with_log_of_income_and_amount, train)
+
+mcfadden_r_square(model_2014_ratio_of_loan_to_income_with_log_of_income_and_amount, null_model)
+
+```
+
+
+# Cross validation
+```{r}
+model_2014_cross_val_loan_income_ratio <- cross_validation("loan_granted~applicant_race_and_ethnicity+loan_to_income_ratio+co_applicant_present+owner_occupancy+preapproval+property_type+respondent_id+log_loan_amount_000s+county_code+loan_purpose+tract_to_msamd_income+minority_population+agency_code+rate_spread+loan_to_income_ratio", train)
+
+model_summary_and_plot(model_2014_cross_val_loan_income_ratio$finalModel, train)
+
+```
+
+# Model performance.
+
+```{r}
+library(ROCR)
+library(pROC)
+model1_fitted.probs <- predict(model_2014_income_loan_amount, test, type = "response")
+model2_fitted.probs <- predict(model_2014_log_income_loan_amount, test, type = "response")
+model3_fitted.probs <- predict(model_2014_ratio_of_loan_to_income_with_log_of_income_and_amount, test, type = "response")
+
+writeLines("")
+writeLines("Model 1 performance")
+print_model_performance(model1_fitted.probs, test, positive = "yes", negative = "no", threshold = 0.6)
+
+writeLines("")
+writeLines("Model 2 performance")
+print_model_performance(model2_fitted.probs, test, positive = "yes", negative = "no", threshold = 0.6)
+
+writeLines("")
+writeLines("Model 3 performance")
+print_model_performance(model3_fitted.probs, test, positive = "yes", negative = "no", threshold = 0.6)
+
+```
+
+
+# Cross validation performance
+```{r}
+library(pROC)
+
+mcfadden_r_square(model_2014_cross_val_loan_income_ratio$finalModel, null_model)
+
+model4_fitted.probs <- predict(model_2014_cross_val_loan_income_ratio, test, type = "prob")
+writeLines("")
+writeLines("Cross validation model performance")
+
+writeLines("")
+writeLines("Model 3 performance")
+print_model_performance(model4_fitted.probs[, 2], test, positive = "yes", negative = "no", threshold = 0.6)
+```
+
+# Model with census data integrated.
+```{r}
+# https://www2.census.gov/programs-surveys/popest/datasets/2010-2018/counties/asrh/
+census_pa_file_path <- paste(census_data_dir, sep = "", "/cc-est2018-alldata-42.csv")
+
+merged_hmda_data_df_for_model <- merge_hmda_df_with_census(census_pa_file_path, hmda_data_df_for_model)
+
+split_dfs <- train_test_split(merged_hmda_data_df_for_model$loan_granted, merged_hmda_data_df_for_model)
+
+merged_train <- split_dfs[[1]]
+merged_test <- split_dfs[[2]]
+
+merged_2014_model <- build_glm_model("loan_granted~applicant_race_and_ethnicity+owner_occupancy+preapproval+property_type+log_loan_amount_000s+tract_to_msamd_income+co_applicant_present+agency_code+BLACK_PERCENT+ASIAN_PERCENT+HISPANIC_PERCENT+county_code+respondent_id+applicant_sex+loan_purpose+loan_to_income_ratio", merged_train)
+
+model5_fitted.probs <- predict(merged_2014_model, merged_test, type = "response")
+
+writeLines("")
+writeLines("Merged model performance")
+
+print_model_performance(model5_fitted.probs, merged_test, positive = "yes", negative = "no", threshold = 0.6)
+```
+
+# Loan to value ratio is an important metric which banks use to decide
+# whether a loan should be granted or not. For e.g. the higher the loan
+# to value ratio the riskier it is for the bank.
+# https://en.wikipedia.org/wiki/Loan-to-value_ratio
+# Banks are not required  to report this metric in the HMDA reporting
+# law. We use the median of the home values in that county based on
+# data available from zillow https://www.zillow.com/research/data/
+```{r}
+period_list <- c("2014-01", "2014-02", "2014-03", "2014-04",
+                 "2014-05", "2014-06", "2014-07", "2014-08",
+                 "2014-09", "2014-10", "2014-11", "2014-12")
+
+merged_hmda_with_loan_to_value_ratio <- augment_hmda_data_with_estimated_loan_to_value_ratio_from_zillow(paste(data_dir, "/zillow/counties_home_value_per_year.csv", sep = ""), hmda_data_df_for_model, "PA", period_list)
+
+
+head(merged_hmda_with_loan_to_value_ratio)
+
+```
+
+# Train test split on the hmda dataset merged with estimated loan to value
+# ratio
+```{r}
+split_dfs <- train_test_split(merged_hmda_with_loan_to_value_ratio$loan_granted, merged_hmda_with_loan_to_value_ratio)
+new_train <- split_dfs[[1]]
+new_test <- split_dfs[[2]]
+```
+
+## Model with estimated loan to value ratio.
+```{r}
+model_2014_with_loan_to_value_ratio <-
+build_glm_model("loan_granted~applicant_race_and_ethnicity+owner_occupancy+preapproval+log_loan_amount_000s+applicant_sex+county_code+tract_to_msamd_income+co_applicant_present+agency_code+minority_population+loan_to_income_ratio+loan_purpose+rate_spread+property_type+loan_to_value_ratio+respondent_id", new_train)
+
+model_summary_and_plot(model_2014_with_loan_to_value_ratio, train = new_train)
+mcfadden_r_square(model_2014_with_loan_to_value_ratio, null_model)
+
+ggplot(data = merged_hmda_with_loan_to_value_ratio, aes(x=loan_to_value_ratio)) +geom_histogram(fill = "steelblue") + labs(title = "Loan amount to Home Value Ratio" , x = "Loan amount to Home Value Ratio",y="Count")
+
+model6_fitted.probs <- predict(model_2014_with_loan_to_value_ratio, new_test, type = "response")
+
+writeLines("")
+writeLines("Model with estimated loan to value ratio performance")
+
+print_model_performance(model6_fitted.probs, new_test, positive = "yes", negative = "no", threshold = 0.6)
+
+```
+
+# Save the models
+```{r}
+dir.create(model_path, showWarnings = FALSE)
+save(model_2014_income_loan_amount, file = paste(model_path, "/model_income_loan_amount.rdata", sep=""))
+save(model_2014_log_income_loan_amount, file = paste(model_path, "/model_log_income_loan_amount.rdata", sep=""))
+save(model_2014_ratio_of_loan_to_income_with_log_of_income_and_amount, file = paste(model_path, "/model_loan_income_ratio_with_log_of_income_and_amount.rdata", sep=""))
+save(model_2014_cross_val_loan_income_ratio, file = paste(model_path, "/cross_val_model.rdata", sep=""))
+save(merged_2014_model, file = paste(model_path, "/merged_model.rdata", sep=""))
+
+save(model_2014_with_loan_to_value_ratio, file = paste(model_path, "/merged_model_with_loan_to_value.rdata", sep=""))
+```
+
+# Save the train and test data for future reference.
+
+```{r}
+
+dir.create(model_data_path, showWarnings = FALSE)
+save(train, file = paste(model_data_path, "/train.rdata", sep = ""))
+save(test, file = paste(model_data_path, "/test.rdata", sep = ""))
+
+dir.create(model_data_path, showWarnings = FALSE)
+save(merged_train, file = paste(model_data_path, "/merged_train.rdata", sep = ""))
+save(merged_test, file = paste(model_data_path, "/merged_test.rdata", sep = ""))
+
+dir.create(model_data_path, showWarnings = FALSE)
+save(new_train, file = paste(model_data_path, "/train_with_loan_to_value.rdata", sep = ""))
+save(new_test, file = paste(model_data_path, "/test_with_loan_to_value.rdata", sep = ""))
+
+
+```

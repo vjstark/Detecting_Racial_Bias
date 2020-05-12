@@ -1,0 +1,153 @@
+---
+title: "PA 2014 HMDA Feature Selection"
+author: "Anantanarayanan G Iyengar [Please add your names here]" 
+date: "4/18/2020"
+output: html_notebook
+---
+
+## Global setup like working directory, data directory etc should happen here.
+
+```{r}
+library(sys)
+working_directory <- getwd()
+
+setwd(dirname(dirname(working_directory)))
+
+writeLines("")
+getwd()
+
+data_dir <- "D:/data"
+
+```
+
+## Install required packages.
+```{r}
+# https://stackoverflow.com/questions/4090169/elegant-way-to-check-for-missing-packages-and-install-them
+list_of_packages <- c("mlbench", "corrplot", "rvest", "tidyr", "stringr", "dplyr", "lubridate", "data.table", "mice", "scales", "naniar", "rpart", "rpart.plot", "caret", "pROC", "ROCR", "randomForest")
+new.packages <- list_of_packages[!(list_of_packages %in% installed.packages()[,"Package"])]
+
+if (length(new.packages)) {
+  print("Installing packages\n")
+  install.packages(new.packages())
+}
+
+library(corrplot)
+library(ggplot2)
+library(tidyr)
+library(stringr)
+library(dplyr)
+library(data.table)
+library(mice)
+library(rstudioapi)    
+library(naniar)
+library(caret)
+library(pROC)
+library(ROCR)
+
+source(paste(dirname(dirname(rstudioapi::getActiveDocumentContext()$path)), "utils/utils.r", sep="/"))
+
+source(paste(dirname(dirname(rstudioapi::getActiveDocumentContext()$path)), "utils/model_utils.r", sep="/"))
+
+```
+
+# Load the imputed hmda csv file.
+```{r}
+hmda_data_df <- fread("/Users/omkarpawar/Desktop/Data/PA/hmda_2014_pa_imputed.csv")
+hmda_data_df <- as.data.frame(hmda_data_df_)
+```
+
+# Feature selection section
+
+# First start with columns we think are relevant.
+```{r}
+hmda_model_df <- hmda_data_frame_for_model(hmda_data_df)
+hmda_model_df <- process_model_df_columns(hmda_model_df)
+
+```
+
+# Variable importance plots. We plot the top 25 predictors using the roc curve
+# value of that predictor in relation to the loan_granted output value.
+```{r}
+
+hmda_df_filtered <- hmda_model_df[, -which(names(hmda_model_df) %in% c("county_name", "credit_score"))]
+
+  var_imp <- filterVarImp(x = hmda_df_filtered[, -c(24)], y = hmda_df_filtered$loan_granted)
+
+var_imp_sorted <- var_imp[-var_imp$no, ]
+
+row.names(var_imp_sorted) = rownames(var_imp_sorted)
+
+var_imp_sorted_top_25 <- var_imp_sorted[1:25, ]
+
+
+install.packages("wesanderson")
+# Load
+library(wesanderson)
+p<-ggplot(data=var_imp_sorted_top_25, aes(x=no, y = reorder(rownames(var_imp_sorted_top_25),no), fill = no)) +
+  geom_bar(stat="identity")
+p +scale_fill_gradient(low="steelblue", high="tomato")+labs(title = "Value of that predictor in relation to the output variable", x = "Importance", y = "Variable" , fill = "Importance")
+
+```
+
+# Build full glm model
+```{r}
+# Skip the county name, credit_score and lien_status when we build the full
+# model.
+hmda_df_filtered <- hmda_model_df[, -which(names(hmda_model_df) %in% c("county_name", "credit_score", "lien_status", "purchaser_type"))]
+full_model <- build_glm_model("loan_granted~.", hmda_df_filtered)
+```
+
+# Summary and Anova
+```{r}
+p
+summary(full_model)
+anova(full_model)
+```
+
+# Variable importance using the full_model generated above.
+```{r}
+importance <- varImp(full_model, scale = FALSE)
+importance_df <- as.data.frame(importance)
+importance_df <- data.frame(names = rownames(importance_df), overall = importance_df$Overall)
+importance_df <- importance_df[order(importance_df$overall, decreasing = T), ]
+
+importance_df$names
+
+importance_df_top <- importance_df[1:23, ]
+
+p<-ggplot(data=importance_df_top, aes(x=overall, y = reorder(names, overall), fill = overall)) +
+  geom_bar(stat="identity") 
+p+scale_fill_gradient(low="steelblue", high="tomato")+labs(title = "Variable Importances using full glm model", x = "Importance", y = "Variable" , fill = "Importance")
+
+```
+
+# Variable Importance Through Random Forest
+# https://dataaspirant.com/2018/01/15/feature-selection-techniques-r
+# Random forests are based on decision trees and use bagging to come up with a
+# model over the data. Random forests also have a feature importance methodology
+# which uses ‘gini index’ to assign a score and rank the features.
+
+```{r}
+library(randomForest)
+head(hmda_df_filtered)
+fit_rf = randomForest(loan_granted~., data = hmda_df_filtered)
+
+```
+
+# Create an importance based on mean decreasing gini
+
+```{r}
+importance(fit_rf)
+```
+
+# These scores which are denoted as ‘Mean Decrease Gini’ by the importance measure # represents how much each feature contributes to the homogeneity in the data. The # way it works is as follows:
+# Each time a feature is used to split data at a node, the Gini index is calculated # at the root node and at both the leaves. The Gini index represents the
+# homogeneity and is 0 for completely homogeneous data and 1 for completely
+# heterogeneous data.
+
+# compare feature importance with the varImp function
+```{r}
+varImp(fit_rf)
+varImpPlot(fit_rf)
+```
+
